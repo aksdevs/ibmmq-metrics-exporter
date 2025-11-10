@@ -37,7 +37,7 @@ func (c *MQClient) Connect() error {
 	c.logger.WithFields(logrus.Fields{
 		"queue_manager":   c.config.QueueManager,
 		"channel":         c.config.Channel,
-		"connection_name": c.config.ConnectionName,
+		"connection_name": c.config.GetConnectionName(),
 	}).Info("Connecting to IBM MQ")
 
 	// Create connection options
@@ -47,7 +47,7 @@ func (c *MQClient) Connect() error {
 	// Set channel definition
 	cd := ibmmq.NewMQCD()
 	cd.ChannelName = c.config.Channel
-	cd.ConnectionName = c.config.ConnectionName
+	cd.ConnectionName = c.config.GetConnectionName()
 	// Note: ChannelType is not available in client MQCD structure
 
 	// Set security options if SSL/TLS is configured
@@ -60,10 +60,10 @@ func (c *MQClient) Connect() error {
 	cno.ClientConn = cd
 
 	// Set user credentials if provided
-	if c.config.User != "" {
+	if c.config.GetUser() != "" {
 		csp := ibmmq.NewMQCSP()
 		csp.AuthenticationType = ibmmq.MQCSP_AUTH_USER_ID_AND_PWD
-		csp.UserId = c.config.User
+		csp.UserId = c.config.GetUser()
 		csp.Password = c.config.Password
 		cno.SecurityParms = csp
 	}

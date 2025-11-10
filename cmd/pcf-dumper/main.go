@@ -23,6 +23,17 @@ func main() {
 		log.Fatalf("Failed to load configuration from %s: %v", *configPath, err)
 	}
 
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Configuration validation failed: %v", err)
+	}
+
+	fmt.Printf("Queue Manager: %s\n", cfg.MQ.QueueManager)
+	fmt.Printf("Connection: %s via %s\n", cfg.MQ.GetConnectionName(), cfg.MQ.Channel)
+	fmt.Printf("Statistics Queue: %s\n", cfg.Collector.StatsQueue)
+	fmt.Printf("Accounting Queue: %s\n", cfg.Collector.AccountingQueue)
+	fmt.Println()
+
 	// Create logger
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)

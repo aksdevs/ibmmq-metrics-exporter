@@ -1,8 +1,7 @@
 # IBM MQ Statistics and Accounting Collector
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/your-org/ibmmq-go-stat-otel)](https://goreportcard.com/report/github.com/your-org/ibmmq-go-stat-otel)
-[![Docker Pulls](https://img.shields.io/docker/pulls/your-org/ibmmq-collector)](https://hub.docker.com/r/your-org/ibmmq-collector)
-[![License](https://img.shields.io/github/license/your-org/ibmmq-go-stat-otel)](LICENSE)
+[![Go Report Card](https://goreportcard.com/badge/github.com/atulksin/ibmmq-go-stat-otel)](https://goreportcard.com/report/github.com/atulksin/ibmmq-go-stat-otel)
+[![License](https://img.shields.io/github/license/atulksin/ibmmq-go-stat-otel)](LICENSE)
 
 A high-performance Go application that collects IBM MQ statistics and accounting data from IBM MQ queue managers and exposes them as Prometheus metrics with OpenTelemetry observability.
 
@@ -10,13 +9,14 @@ A high-performance Go application that collects IBM MQ statistics and accounting
 
 🚀 **High Performance**: Built in Go with efficient IBM MQ client integration  
 📊 **Prometheus Metrics**: Exposes all IBM MQ stats as Prometheus gauges with `ibmmq` prefix  
-� **Reader/Writer Detection**: Identifies applications that read from or write to queues ([Validation Results](docs/READERS_WRITERS_VALIDATION.md))  
-�🔍 **OpenTelemetry**: Full observability with distributed tracing  
-⚙️ **Flexible Configuration**: YAML, environment variables, and CLI flags  
+🔍 **Reader/Writer Detection**: Identifies applications that read from or write to queues  
+� **OpenTelemetry**: Full observability with distributed tracing  
+⚙️ **Flexible Configuration**: YAML configuration with dynamic connection building  
 🐳 **Docker Ready**: Multi-stage Docker builds with BuildKit optimization  
 🔄 **Multiple Modes**: One-time collection or continuous monitoring  
 📈 **Rich Metrics**: Statistics and accounting data from IBM MQ queues  
-🛡️ **Robust**: Comprehensive error handling and logging
+🛡️ **Robust**: Comprehensive error handling and logging  
+🧪 **Testing Tools**: Includes scripts to generate test activity on multiple platforms
 
 ## Prerequisites
 
@@ -257,21 +257,57 @@ ibmmq_queue_has_readers + ibmmq_queue_has_writers
 
 ## Docker
 
-### Dockerfile
+### Building with Docker
 
-```dockerfile
-FROM golang:1.21-alpine AS builder
-WORKDIR /app
-COPY . .
-RUN go build -o ibmmq-collector ./cmd/collector
+The repository includes a configurable multi-stage Dockerfile optimized for production use with IBM MQ client libraries:
 
-FROM alpine:latest
-RUN apk --no-cache add ca-certificates
-WORKDIR /root/
-COPY --from=builder /app/ibmmq-collector .
-EXPOSE 9090
-CMD ["./ibmmq-collector"]
+#### Quick Build (Downloads MQ Client)
+```bash
+# Build with BuildKit for optimal caching and parallel builds
+export DOCKER_BUILDKIT=1
+docker build -t ibmmq-collector .
 ```
+
+#### Configurable Build with Local IBM MQ
+
+The Dockerfile supports configurable IBM MQ paths for different platforms:
+
+**Windows (PowerShell):**
+```powershell
+# Use local IBM MQ installation
+.\scripts\docker-build.ps1 -LocalMQ
+
+# Custom paths
+.\scripts\docker-build.ps1 -LocalMQ -IncludePath "C:\IBM\MQ\tools\c\include" -LibPath "C:\IBM\MQ\bin64"
+```
+
+**Linux/Unix (Bash):**
+```bash
+# Use local IBM MQ installation
+./scripts/docker-build.sh --local-mq
+
+# Custom paths
+./scripts/docker-build.sh --local-mq --include-path "/opt/mqm/inc" --lib-path "/opt/mqm/lib64"
+```
+
+**Manual Build Arguments:**
+```bash
+docker build \
+  --build-arg USE_LOCAL_MQ=true \
+  --build-arg MQ_INCLUDE_PATH="/opt/mqm/inc" \
+  --build-arg MQ_LIB_PATH="/opt/mqm/lib64" \
+  -t ibmmq-collector .
+```
+
+#### Dockerfile Features:
+- 🏗️ **Multi-stage build** for minimal final image size
+- ⚙️ **Configurable IBM MQ paths** supporting Windows/Linux installations
+- 🔧 **64-bit GCC compilation** with proper library linking
+- 🚀 **BuildKit optimization** with mount caches for faster builds
+- 🧪 **Parallel test execution** during build process
+- 🛡️ **Security hardening** with non-root user
+- 📦 **Minimal runtime** based on Debian Bullseye slim
+- 🔄 **Fallback mechanisms** for missing MQ installations
 
 ### Docker Compose
 
@@ -357,6 +393,46 @@ go test ./... -tags=integration
 ./ibmmq-collector test -c config.yaml
 ```
 
+### Test Activity Generation
+
+The repository includes cross-platform scripts to generate IBM MQ activity for testing:
+
+#### Windows (PowerShell)
+```powershell
+# Generate activity with default settings (50 messages per queue)
+.\sample-runs\generate-test-activity.ps1
+
+# Custom message count and queues
+.\sample-runs\generate-test-activity.ps1 -MessageCount 100 -Queues @("QUEUE1", "QUEUE2")
+```
+
+#### Linux/Unix (Bash)
+```bash
+# Make script executable
+chmod +x sample-runs/generate-test-activity.sh
+
+# Source IBM MQ environment (if needed)
+source /opt/mqm/bin/setmqenv -s
+
+# Generate activity
+./sample-runs/generate-test-activity.sh -m 100 -Q "QUEUE1 QUEUE2"
+```
+
+These scripts:
+- ✅ Create **writer activity** using `amqsput` (generates opprocs statistics)
+- ✅ Create **reader activity** using `amqsget` (generates ipprocs statistics)  
+- ✅ Display queue status and depths
+- ✅ Work with any IBM MQ installation
+
+After running the scripts, use the collector and PCF dumper to verify detection:
+```bash
+# Analyze raw PCF data
+./pcf-dumper.exe -c configs/default.yaml
+
+# Collect metrics
+./collector.exe test -c configs/default.yaml
+```
+
 ## IBM MQ Setup
 
 ### Enable Statistics
@@ -389,34 +465,42 @@ SET AUTHREC PROFILE('SYSTEM.ADMIN.ACCOUNTING.QUEUE') OBJTYPE(QUEUE) PRINCIPAL('m
 ```
 ibmmq-go-stat-otel/
 ├── cmd/
-│   └── collector/          # Main application entry point
+│   ├── collector/          # Main statistics collector
+│   │   └── main.go
+│   └── pcf-dumper/         # PCF data analysis tool
 │       └── main.go
 ├── pkg/
-│   ├── config/            # Configuration management
+│   ├── config/            # Configuration management with YAML loading
 │   │   ├── config.go
 │   │   └── config_test.go
 │   ├── mqclient/          # IBM MQ client wrapper
 │   │   ├── client.go
 │   │   └── client_test.go
-│   ├── pcf/               # PCF message parser
+│   ├── pcf/               # PCF message parser and decoder
 │   │   ├── parser.go
 │   │   └── parser_test.go
 │   ├── collector/         # Main collector logic
 │   │   ├── collector.go
 │   │   └── collector_test.go
-│   └── prometheus/        # Prometheus metrics
+│   └── prometheus/        # Prometheus metrics integration
 │       ├── collector.go
 │       └── collector_test.go
 ├── internal/
 │   └── otel/              # OpenTelemetry integration
 │       └── provider.go
+├── configs/               # Configuration files
+│   └── default.yaml       # Default configuration template
+├── sample-runs/           # Testing and validation scripts
+│   ├── generate-test-activity.ps1  # Windows PowerShell script
+│   ├── generate-test-activity.sh   # Linux/Unix bash script
+│   └── README.md          # Testing documentation
+├── docs/                  # Project documentation
 ├── test/                  # Integration tests
-├── examples/              # Example configurations
 ├── scripts/               # Build and utility scripts
+├── Dockerfile             # Multi-stage Docker build with IBM MQ client
+├── docker-compose.yml     # Docker Compose configuration
 ├── go.mod
 ├── go.sum
-├── Dockerfile
-├── docker-compose.yml
 └── README.md
 ```
 

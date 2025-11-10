@@ -3,7 +3,7 @@ mq:
   # Queue Manager name
   queue_manager: "MQQM1"
 
-  # Connection details
+  # Connection details (will be built as host(port) format)
   host: "127.0.0.1"
   port: 5200
   channel: "APP1.SVRCONN"
