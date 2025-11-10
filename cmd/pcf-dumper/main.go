@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/binary"
 	"encoding/hex"
+	"flag"
 	"fmt"
 	"log"
 
@@ -12,19 +13,37 @@ import (
 )
 
 func main() {
+	// Command line flags
+	var configFile string
+	flag.StringVar(&configFile, "c", "configs/default.yaml", "Configuration file path")
+	flag.Parse()
+
+	fmt.Println("=== IBM MQ PCF Data Dumper ===")
+	fmt.Printf("Configuration loaded from: %s\n", configFile)
+
 	// Load configuration
-	cfg := &config.MQConfig{
-		QueueManager:   "MQQM1",
-		Channel:        "APP1.SVRCONN",
-		ConnectionName: "127.0.0.1(5200)",
+	cfg, err := config.LoadConfig(configFile)
+	if err != nil {
+		log.Fatalf("Failed to load configuration: %v", err)
 	}
+
+	// Validate configuration
+	if err := cfg.Validate(); err != nil {
+		log.Fatalf("Configuration validation failed: %v", err)
+	}
+
+	fmt.Printf("Queue Manager: %s\n", cfg.MQ.QueueManager)
+	fmt.Printf("Connection: %s via %s\n", cfg.MQ.GetConnectionName(), cfg.MQ.Channel)
+	fmt.Printf("Statistics Queue: %s\n", cfg.Collector.StatsQueue)
+	fmt.Printf("Accounting Queue: %s\n", cfg.Collector.AccountingQueue)
+	fmt.Println()
 
 	// Create logger
 	logger := logrus.New()
 	logger.SetLevel(logrus.InfoLevel)
 
-	// Create MQ client
-	client := mqclient.NewMQClient(cfg, logger)
+	// Create MQ client using the loaded configuration
+	client := mqclient.NewMQClient(&cfg.MQ, logger)
 
 	// Connect
 	if err := client.Connect(); err != nil {
@@ -32,15 +51,13 @@ func main() {
 	}
 	defer client.Disconnect()
 
-	// Open queues
-	if err := client.OpenStatsQueue("SYSTEM.ADMIN.STATISTICS.QUEUE"); err != nil {
+	// Open queues using configuration
+	if err := client.OpenStatsQueue(cfg.Collector.StatsQueue); err != nil {
 		log.Printf("Failed to open statistics queue: %v", err)
 	}
-	if err := client.OpenAccountingQueue("SYSTEM.ADMIN.ACCOUNTING.QUEUE"); err != nil {
+	if err := client.OpenAccountingQueue(cfg.Collector.AccountingQueue); err != nil {
 		log.Printf("Failed to open accounting queue: %v", err)
 	}
-
-	fmt.Println("=== IBM MQ PCF Data Dumper ===")
 
 	// Get accounting messages
 	fmt.Println("\n--- ACCOUNTING MESSAGES ---")

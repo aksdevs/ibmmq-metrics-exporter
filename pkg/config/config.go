@@ -13,10 +13,32 @@ type MQConfig struct {
 	QueueManager   string `mapstructure:"queue_manager" yaml:"queue_manager" json:"queue_manager"`
 	Channel        string `mapstructure:"channel" yaml:"channel" json:"channel"`
 	ConnectionName string `mapstructure:"connection_name" yaml:"connection_name" json:"connection_name"`
+	Host           string `mapstructure:"host" yaml:"host" json:"host"`
+	Port           int    `mapstructure:"port" yaml:"port" json:"port"`
 	User           string `mapstructure:"user" yaml:"user" json:"user"`
+	Username       string `mapstructure:"username" yaml:"username" json:"username"` // Alternative field name
 	Password       string `mapstructure:"password" yaml:"password" json:"password"`
 	KeyRepository  string `mapstructure:"key_repository" yaml:"key_repository" json:"key_repository"`
 	CipherSpec     string `mapstructure:"cipher_spec" yaml:"cipher_spec" json:"cipher_spec"`
+}
+
+// GetConnectionName returns the connection name, building it from host/port if connection_name is empty
+func (m *MQConfig) GetConnectionName() string {
+	if m.ConnectionName != "" {
+		return m.ConnectionName
+	}
+	if m.Host != "" && m.Port > 0 {
+		return fmt.Sprintf("%s(%d)", m.Host, m.Port)
+	}
+	return "127.0.0.1(5200)" // fallback default for our environment
+}
+
+// GetUser returns the user, preferring username over user field
+func (m *MQConfig) GetUser() string {
+	if m.Username != "" {
+		return m.Username
+	}
+	return m.User
 }
 
 // CollectorConfig holds collector-specific configuration
@@ -54,21 +76,24 @@ type Config struct {
 	Logging    LoggingConfig    `mapstructure:"logging" yaml:"logging" json:"logging"`
 }
 
-// DefaultConfig returns a configuration with sensible defaults
+// DefaultConfig returns a configuration with minimal defaults
 func DefaultConfig() *Config {
 	return &Config{
 		MQ: MQConfig{
-			QueueManager:   "MQQM1",
-			Channel:        "APP1.SVRCONN",
-			ConnectionName: "localhost(1414)",
+			QueueManager:   "", // Will be loaded from YAML
+			Channel:        "", // Will be loaded from YAML
+			ConnectionName: "", // Will be built from host/port if empty
+			Host:           "", // Will be loaded from YAML
+			Port:           0,  // Will be loaded from YAML
 			User:           "",
+			Username:       "",
 			Password:       "",
 			KeyRepository:  "",
 			CipherSpec:     "",
 		},
 		Collector: CollectorConfig{
-			StatsQueue:      "SYSTEM.ADMIN.STATISTICS.QUEUE",
-			AccountingQueue: "SYSTEM.ADMIN.ACCOUNTING.QUEUE",
+			StatsQueue:      "", // Will be loaded from YAML
+			AccountingQueue: "", // Will be loaded from YAML
 			ResetStats:      false,
 			Interval:        60 * time.Second,
 			MaxCycles:       0, // 0 means infinite
@@ -155,8 +180,8 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("channel name is required")
 	}
 
-	if c.MQ.ConnectionName == "" {
-		return fmt.Errorf("connection name is required")
+	if c.MQ.GetConnectionName() == "" {
+		return fmt.Errorf("connection name is required (provide either connection_name or host/port)")
 	}
 
 	if c.Collector.Interval < time.Second {

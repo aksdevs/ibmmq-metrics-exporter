@@ -3,10 +3,10 @@ mq:
   # Queue Manager name
   queue_manager: "MQQM1"
 
-  # Connection details
+  # Connection details (will be built as host(port) format)
   host: "127.0.0.1"
   port: 5200
-  channel: "SYSTEM.DEF.SVRCONN"
+  channel: "APP1.SVRCONN"
 
   # Authentication (leave empty for no authentication)
   username: ""
@@ -24,10 +24,10 @@ mq:
 # Collection Configuration
 collector:
   # Collection interval (0 or empty = one-time collection)
-  interval: "0s"
+  interval: "60s"
 
   # Queue names to collect from
-  statistics_queue: "SYSTEM.ADMIN.STATISTICS.QUEUE"
+  stats_queue: "SYSTEM.ADMIN.STATISTICS.QUEUE"
   accounting_queue: "SYSTEM.ADMIN.ACCOUNTING.QUEUE"
 
   # Collection timeout per queue
