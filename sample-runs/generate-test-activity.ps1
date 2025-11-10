@@ -22,69 +22,44 @@ $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 foreach ($queue in $Queues) {
     Write-Host "`nGenerating activity for queue: $queue"
     
-    # Create MQSC script to put messages
-    $mqscScript = @"
-* Put test messages to $queue
-* Generated at $timestamp
-"@
-    
-    for ($i = 1; $i -le $MessageCount; $i++) {
-        $messageText = "Test message $i for $queue - Generated at $timestamp"
-        $mqscScript += "`nPUT QUEUE('$queue') MESSAGE('$messageText')"
-    }
-    
-    # Save script to file
-    $scriptFile = "sample-runs\put_messages_$($queue.Replace('.', '_')).mqsc"
-    $mqscScript | Out-File -FilePath $scriptFile -Encoding ASCII
-    
-    Write-Host "Created MQSC script: $scriptFile"
-    
-    # Execute the script using runmqsc
+    # Put messages using amqsput (the correct way)
+    Write-Host "Putting $MessageCount messages to $queue..."
     try {
-        Write-Host "Putting $MessageCount messages to $queue..."
-        $result = Get-Content $scriptFile | & "C:\Program Files\IBM\MQ\bin64\runmqsc" $QueueManager 2>&1
+        $messages = @()
+        for ($i = 1; $i -le $MessageCount; $i++) {
+            $messages += "Test message $i for $queue - Generated at $timestamp"
+        }
+        $messages += ""  # Empty line to terminate amqsput
+        
+        $putResult = $messages | & "C:\Program Files\IBM\MQ\bin64\amqsput.exe" $queue $QueueManager 2>&1
         
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "Successfully put messages to $queue" -ForegroundColor Green
+            Write-Host "Successfully put $MessageCount messages to $queue" -ForegroundColor Green
         } else {
-            Write-Host "Error putting messages to $queue" -ForegroundColor Red
-            Write-Host $result
+            Write-Host "Error putting messages to $queue (Exit code: $LASTEXITCODE)" -ForegroundColor Red
+            Write-Host $putResult
         }
     }
     catch {
-        Write-Host "Failed to execute runmqsc: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Failed to execute amqsput: $($_.Exception.Message)" -ForegroundColor Red
     }
     
-    # Now get some messages back to create GET statistics
-    $getMessage = @"
-* Get some messages from $queue
-* This creates GET statistics
-"@
-    
+    # Get some messages back using amqsget to create GET statistics
     $getCount = [Math]::Floor($MessageCount / 2) # Get half the messages back
-    for ($i = 1; $i -le $getCount; $i++) {
-        $getMessage += "`nGET QUEUE('$queue')"
-    }
+    Write-Host "Getting $getCount messages from $queue to create reader statistics..."
     
-    $getScriptFile = "sample-runs\get_messages_$($queue.Replace('.', '_')).mqsc"
-    $getMessage | Out-File -FilePath $getScriptFile -Encoding ASCII
-    
-    Write-Host "Created GET script: $getScriptFile"
-    
-    # Execute the GET script
     try {
-        Write-Host "Getting $getCount messages from $queue..."
-        $result = Get-Content $getScriptFile | & "C:\Program Files\IBM\MQ\bin64\runmqsc" $QueueManager 2>&1
-        
-        if ($LASTEXITCODE -eq 0) {
-            Write-Host "Successfully got messages from $queue" -ForegroundColor Green
-        } else {
-            Write-Host "Error getting messages from $queue" -ForegroundColor Red
-            Write-Host $result
+        for ($i = 1; $i -le $getCount; $i++) {
+            $getResult = & "C:\Program Files\IBM\MQ\bin64\amqsget.exe" $queue $QueueManager 2>&1
+            if ($LASTEXITCODE -ne 0) {
+                Write-Host "No more messages available in $queue" -ForegroundColor Yellow
+                break
+            }
         }
+        Write-Host "Successfully retrieved messages from $queue" -ForegroundColor Green
     }
     catch {
-        Write-Host "Failed to execute runmqsc for GET: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Failed to execute amqsget: $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
