@@ -14,9 +14,29 @@ func TestDefaultConfig(t *testing.T) {
 	cfg := DefaultConfig()
 
 	assert.NotNil(t, cfg)
+	// DefaultConfig() should return empty values that will be populated from YAML
+	assert.Equal(t, "", cfg.MQ.QueueManager)
+	assert.Equal(t, "", cfg.MQ.Channel)
+	assert.Equal(t, "", cfg.MQ.ConnectionName)
+	assert.Equal(t, "", cfg.MQ.Host)
+	assert.Equal(t, 0, cfg.MQ.Port)
+	assert.Equal(t, "", cfg.Collector.StatsQueue)
+	assert.Equal(t, "", cfg.Collector.AccountingQueue)
+	assert.Equal(t, 60*time.Second, cfg.Collector.Interval) // This has a default
+	assert.Equal(t, 9090, cfg.Prometheus.Port)              // This has a default
+	assert.Equal(t, "/metrics", cfg.Prometheus.Path)        // This has a default
+	assert.Equal(t, "ibmmq", cfg.Prometheus.Namespace)      // This has a default
+}
+
+func TestLoadDefaultYAMLConfig(t *testing.T) {
+	// Test loading from the actual default YAML file
+	cfg, err := LoadConfig("../../configs/default.yaml")
+
+	assert.NoError(t, err)
+	assert.NotNil(t, cfg)
 	assert.Equal(t, "MQQM1", cfg.MQ.QueueManager)
 	assert.Equal(t, "APP1.SVRCONN", cfg.MQ.Channel)
-	assert.Equal(t, "localhost(1414)", cfg.MQ.ConnectionName) // Default still has this
+	assert.Equal(t, "127.0.0.1(5200)", cfg.MQ.ConnectionName) // Built from host:port
 	assert.Equal(t, "127.0.0.1", cfg.MQ.Host)
 	assert.Equal(t, 5200, cfg.MQ.Port)
 	assert.Equal(t, "SYSTEM.ADMIN.STATISTICS.QUEUE", cfg.Collector.StatsQueue)
@@ -34,8 +54,11 @@ func TestConfigValidation(t *testing.T) {
 		wantErr bool
 	}{
 		{
-			name:    "valid default config",
-			config:  DefaultConfig(),
+			name: "valid loaded config",
+			config: func() *Config {
+				cfg, _ := LoadConfig("../../configs/default.yaml")
+				return cfg
+			}(),
 			wantErr: false,
 		},
 		{
@@ -70,12 +93,13 @@ func TestConfigValidation(t *testing.T) {
 				MQ: MQConfig{
 					QueueManager: "MQQM1",
 					Channel:      "APP1.SVRCONN",
+					// No connection_name, host, or port - should error
 				},
 				Collector:  DefaultConfig().Collector,
 				Prometheus: DefaultConfig().Prometheus,
 				Logging:    DefaultConfig().Logging,
 			},
-			wantErr: true,
+			wantErr: true, // Should error since no connection info provided
 		},
 		{
 			name: "invalid interval",
@@ -148,13 +172,15 @@ func TestLoadConfigFromEnvironment(t *testing.T) {
 }
 
 func TestConfigString(t *testing.T) {
-	cfg := DefaultConfig()
+	// Load from YAML to get properly populated config
+	cfg, err := LoadConfig("../../configs/default.yaml")
+	require.NoError(t, err)
 	cfg.MQ.User = "testuser"
 
 	str := cfg.String()
 	assert.Contains(t, str, "MQQM1")
 	assert.Contains(t, str, "APP1.SVRCONN")
-	assert.Contains(t, str, "localhost(1414)")
+	assert.Contains(t, str, "127.0.0.1(5200)") // Connection name built from host:port
 	assert.Contains(t, str, "testuser")
 	assert.Contains(t, str, "SYSTEM.ADMIN.STATISTICS.QUEUE")
 	assert.Contains(t, str, "SYSTEM.ADMIN.ACCOUNTING.QUEUE")
@@ -293,9 +319,11 @@ mq:
 collector:
   interval: "60s"
 `,
-			wantErr: false, // Should load with defaults
+			wantErr: false, // Should load with defaults where appropriate
 			check: func(t *testing.T, cfg *Config) {
-				assert.Equal(t, "MQQM1", cfg.MQ.QueueManager) // Default value
+				assert.Empty(t, cfg.MQ.QueueManager)                    // No default - should be empty
+				assert.Equal(t, 60*time.Second, cfg.Collector.Interval) // Should get YAML value
+				assert.Equal(t, 9090, cfg.Prometheus.Port)              // Should get default
 			},
 		},
 	}
@@ -395,23 +423,23 @@ func TestConfigStringOutput(t *testing.T) {
 }
 
 func TestConfigurationDefaults(t *testing.T) {
-	// Test that default configuration has sensible values
+	// Test that default configuration has minimal defaults (most come from YAML)
 	cfg := DefaultConfig()
 
 	require.NotNil(t, cfg)
 
-	// MQ defaults
-	assert.Equal(t, "MQQM1", cfg.MQ.QueueManager)
-	assert.Equal(t, "APP1.SVRCONN", cfg.MQ.Channel)
-	assert.Equal(t, "127.0.0.1", cfg.MQ.Host)
-	assert.Equal(t, 5200, cfg.MQ.Port)
+	// MQ defaults should be empty (loaded from YAML)
+	assert.Empty(t, cfg.MQ.QueueManager)
+	assert.Empty(t, cfg.MQ.Channel)
+	assert.Empty(t, cfg.MQ.Host)
+	assert.Equal(t, 0, cfg.MQ.Port)
 	assert.Empty(t, cfg.MQ.User)
 	assert.Empty(t, cfg.MQ.Password)
 
-	// Collector defaults
-	assert.Equal(t, "SYSTEM.ADMIN.STATISTICS.QUEUE", cfg.Collector.StatsQueue)
-	assert.Equal(t, "SYSTEM.ADMIN.ACCOUNTING.QUEUE", cfg.Collector.AccountingQueue)
-	assert.Equal(t, 60*time.Second, cfg.Collector.Interval)
+	// Collector defaults - only queues are empty (loaded from YAML)
+	assert.Empty(t, cfg.Collector.StatsQueue)
+	assert.Empty(t, cfg.Collector.AccountingQueue)
+	assert.Equal(t, 60*time.Second, cfg.Collector.Interval) // Has sensible default
 	assert.False(t, cfg.Collector.ResetStats)
 
 	// Prometheus defaults

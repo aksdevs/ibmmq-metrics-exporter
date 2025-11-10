@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -289,7 +290,7 @@ collector:
   interval: "10s"
   max_messages: 10000
   timeout: "30s"
-  reset_statistics: true
+  reset_stats: true
 
 metrics:
   enabled: true
@@ -357,9 +358,10 @@ logging:
 	require.NoError(t, err)
 	require.NotNil(t, cfg)
 
-	// Verify security settings (these fields may not exist in current config struct)
-	assert.Equal(t, "secure_user", cfg.MQ.User)
+	// Verify security settings - use correct field names from YAML
+	assert.Equal(t, "secure_user", cfg.MQ.Username) // YAML uses 'username' field
 	assert.Equal(t, "secure_pass", cfg.MQ.Password)
+	assert.Equal(t, "secure_user", cfg.MQ.GetUser()) // Test the getter method too
 	// SSL settings would be tested if the config struct supports them
 }
 
@@ -399,12 +401,38 @@ func TestCollectorLifecycleConfiguration(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			// Create a base configuration and modify it for each test
-			cfg := config.DefaultConfig()
-			require.NotNil(t, cfg)
+			// Create YAML config for each test
+			tempDir := t.TempDir()
+			configPath := filepath.Join(tempDir, "test_config.yaml")
 
-			// Apply test-specific configuration
-			// Note: This is a simplified version. In practice, you'd modify the YAML
+			// Build YAML content based on test config
+			yamlContent := `
+mq:
+  queue_manager: "TEST_QM"
+  host: "localhost"
+  port: 1414
+  channel: "TEST.SVRCONN"
+collector:
+  stats_queue: "SYSTEM.ADMIN.STATISTICS.QUEUE"
+  accounting_queue: "SYSTEM.ADMIN.ACCOUNTING.QUEUE"`
+
+			// Add specific collector settings from test config
+			if interval, ok := tt.config["collector.interval"]; ok {
+				yamlContent += fmt.Sprintf("\n  interval: \"%v\"", interval)
+			}
+			if maxCycles, ok := tt.config["collector.max_cycles"]; ok {
+				yamlContent += fmt.Sprintf("\n  max_cycles: %v", maxCycles)
+			}
+			if continuous, ok := tt.config["collector.continuous"]; ok {
+				yamlContent += fmt.Sprintf("\n  continuous: %v", continuous)
+			}
+
+			err := os.WriteFile(configPath, []byte(yamlContent), 0644)
+			require.NoError(t, err)
+
+			cfg, err := config.LoadConfig(configPath)
+			require.NoError(t, err)
+			require.NotNil(t, cfg)
 
 			if tt.validate != nil {
 				tt.validate(t, cfg)
@@ -430,12 +458,24 @@ func TestCollectorIntegrationScenarios(t *testing.T) {
 			name:        "development environment",
 			description: "Test development environment configuration",
 			setup: func() *config.Config {
-				cfg := config.DefaultConfig()
-				cfg.MQ.QueueManager = "DEV.QM"
-				cfg.MQ.Host = "localhost"
-				cfg.MQ.Port = 1414
-				cfg.Logging.Level = "debug"
-				cfg.Logging.Verbose = true
+				tempDir := t.TempDir()
+				configPath := filepath.Join(tempDir, "dev_config.yaml")
+				configContent := `
+mq:
+  queue_manager: "DEV.QM"
+  host: "localhost"
+  port: 1414
+  channel: "DEV.SVRCONN"
+collector:
+  stats_queue: "SYSTEM.ADMIN.STATISTICS.QUEUE"
+  accounting_queue: "SYSTEM.ADMIN.ACCOUNTING.QUEUE"
+logging:
+  level: "debug"
+  verbose: true`
+				err := os.WriteFile(configPath, []byte(configContent), 0644)
+				require.NoError(t, err)
+				cfg, err := config.LoadConfig(configPath)
+				require.NoError(t, err)
 				return cfg
 			},
 		},
@@ -443,13 +483,23 @@ func TestCollectorIntegrationScenarios(t *testing.T) {
 			name:        "production environment",
 			description: "Test production environment configuration",
 			setup: func() *config.Config {
-				cfg := config.DefaultConfig()
-				cfg.MQ.QueueManager = "PROD.QM"
-				cfg.MQ.Host = "prod-mq.company.com"
-				cfg.MQ.Port = 1414
-				cfg.Logging.Level = "warn"
-				cfg.Logging.Format = "json"
-				cfg.Logging.Verbose = false
+				tempDir := t.TempDir()
+				configPath := filepath.Join(tempDir, "prod_config.yaml")
+				configContent := `
+mq:
+  queue_manager: "PROD.QM"
+  host: "prod.mq.com"
+  port: 1414
+  channel: "PROD.SVRCONN"
+collector:
+  stats_queue: "SYSTEM.ADMIN.STATISTICS.QUEUE"
+  accounting_queue: "SYSTEM.ADMIN.ACCOUNTING.QUEUE"
+logging:
+  level: "info"`
+				err := os.WriteFile(configPath, []byte(configContent), 0644)
+				require.NoError(t, err)
+				cfg, err := config.LoadConfig(configPath)
+				require.NoError(t, err)
 				return cfg
 			},
 		},

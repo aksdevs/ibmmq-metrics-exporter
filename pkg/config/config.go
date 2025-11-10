@@ -30,7 +30,7 @@ func (m *MQConfig) GetConnectionName() string {
 	if m.Host != "" && m.Port > 0 {
 		return fmt.Sprintf("%s(%d)", m.Host, m.Port)
 	}
-	return "127.0.0.1(5200)" // fallback default for our environment
+	return "" // No fallback - must be provided via YAML or environment variables
 }
 
 // GetUser returns the user, preferring username over user field
@@ -77,14 +77,16 @@ type Config struct {
 }
 
 // DefaultConfig returns a configuration with minimal defaults
+// Most values should be loaded from YAML configuration files
 func DefaultConfig() *Config {
 	return &Config{
 		MQ: MQConfig{
-			QueueManager:   "MQQM1",
-			Channel:        "APP1.SVRCONN",
-			ConnectionName: "localhost(1414)",
-			Host:           "127.0.0.1",
-			Port:           5200,
+			// All MQ connection details should come from YAML
+			QueueManager:   "",
+			Channel:        "",
+			ConnectionName: "",
+			Host:           "",
+			Port:           0,
 			User:           "",
 			Username:       "",
 			Password:       "",
@@ -95,8 +97,8 @@ func DefaultConfig() *Config {
 			StatsQueue:      "", // Will be loaded from YAML
 			AccountingQueue: "", // Will be loaded from YAML
 			ResetStats:      false,
-			Interval:        60 * time.Second,
-			MaxCycles:       0, // 0 means infinite
+			Interval:        60 * time.Second, // Sensible default
+			MaxCycles:       0,                // 0 means infinite
 			Continuous:      false,
 		},
 		Prometheus: PrometheusConfig{
