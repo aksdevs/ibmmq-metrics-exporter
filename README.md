@@ -1,7 +1,7 @@
 # IBM MQ Statistics and Accounting Collector
 
 [![Go Report Card](https://goreportcard.com/badge/github.com/atulksin/ibmmq-go-stat-otel)](https://goreportcard.com/report/github.com/atulksin/ibmmq-go-stat-otel)
-[![License](https://img.shields.io/github/license/atulksin/ibmmq-go-stat-otel)](LICENSE)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A high-performance Go application that collects IBM MQ statistics and accounting data from IBM MQ queue managers and exposes them as Prometheus metrics with OpenTelemetry observability.
 
@@ -466,9 +466,11 @@ SET AUTHREC PROFILE('SYSTEM.ADMIN.ACCOUNTING.QUEUE') OBJTYPE(QUEUE) PRINCIPAL('m
 ibmmq-go-stat-otel/
 ├── cmd/
 │   ├── collector/          # Main statistics collector
-│   │   └── main.go
+│   │   ├── main.go
+│   │   └── main_test.go
 │   └── pcf-dumper/         # PCF data analysis tool
-│       └── main.go
+│       ├── main.go
+│       └── main_test.go
 ├── pkg/
 │   ├── config/            # Configuration management with YAML loading
 │   │   ├── config.go
@@ -483,25 +485,33 @@ ibmmq-go-stat-otel/
 │   │   ├── collector.go
 │   │   └── collector_test.go
 │   └── prometheus/        # Prometheus metrics integration
-│       ├── collector.go
-│       └── collector_test.go
+│       └── collector.go
 ├── internal/
 │   └── otel/              # OpenTelemetry integration
 │       └── provider.go
 ├── configs/               # Configuration files
 │   └── default.yaml       # Default configuration template
+├── examples/              # Example configurations
+│   ├── config-development.yaml
+│   ├── config-production.yaml
+│   ├── prometheus.yml
+│   └── ibmmq_alerts.yml
 ├── sample-runs/           # Testing and validation scripts
 │   ├── generate-test-activity.ps1  # Windows PowerShell script
 │   ├── generate-test-activity.sh   # Linux/Unix bash script
 │   └── README.md          # Testing documentation
-├── docs/                  # Project documentation
-├── test/                  # Integration tests
 ├── scripts/               # Build and utility scripts
+│   ├── build.sh
+│   ├── build.bat
+│   ├── docker-build.sh
+│   └── docker-build.ps1
 ├── Dockerfile             # Multi-stage Docker build with IBM MQ client
 ├── docker-compose.yml     # Docker Compose configuration
-├── go.mod
-├── go.sum
-└── README.md
+├── LICENSE                # MIT License
+├── Makefile              # Build automation
+├── go.mod                # Go module definition
+├── go.sum                # Go dependency checksums
+└── README.md             # Project documentation
 ```
 
 ## API Reference
@@ -642,7 +652,7 @@ go test ./...
 
 ## License
 
-This project is licensed under the MIT License - see the LICENSE file for details.
+This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
 
 ## Support
 
