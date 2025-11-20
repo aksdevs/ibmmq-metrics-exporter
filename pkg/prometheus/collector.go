@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/config"
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/mqclient"
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/pcf"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/mqclient"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/pcf"
 )
 
 // MetricsCollector handles collection and export of IBM MQ metrics to Prometheus

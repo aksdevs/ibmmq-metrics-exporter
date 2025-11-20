@@ -3,8 +3,8 @@ package mqclient
 import (
 	"testing"
 
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/config"
 	"github.com/sirupsen/logrus"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

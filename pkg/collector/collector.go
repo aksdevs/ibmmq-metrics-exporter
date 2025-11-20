@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/atulksin/ibmmq-go-stat-otel/internal/otel"
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/config"
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/mqclient"
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/pcf"
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/prometheus"
 	"github.com/sirupsen/logrus"
+	"github.com/skatul/ibmmq-go-stat-otel/internal/otel"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/mqclient"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/pcf"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/prometheus"
 )
 
 // Collector is the main IBM MQ statistics collector

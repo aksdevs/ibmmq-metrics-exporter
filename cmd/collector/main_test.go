@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/config"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

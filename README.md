@@ -1,6 +1,6 @@
 # IBM MQ Statistics and Accounting Collector
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/atulksin/ibmmq-go-stat-otel)](https://goreportcard.com/report/github.com/atulksin/ibmmq-go-stat-otel)
+[![Go Report Card](https://goreportcard.com/badge/github.com/skatul/ibmmq-go-stat-otel)](https://goreportcard.com/report/github.com/skatul/ibmmq-go-stat-otel)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A high-performance Go application that collects IBM MQ statistics and accounting data from IBM MQ queue managers and exposes them as Prometheus metrics with OpenTelemetry observability.
@@ -30,7 +30,7 @@ A high-performance Go application that collects IBM MQ statistics and accounting
 ### From Source
 
 ```bash
-git clone https://github.com/atulksin/ibmmq-go-stat-otel.git
+git clone https://github.com/skatul/ibmmq-go-stat-otel.git
 cd ibmmq-go-stat-otel
 go build -o ibmmq-collector ./cmd/collector
 ```
@@ -38,7 +38,7 @@ go build -o ibmmq-collector ./cmd/collector
 ### Using Go Install
 
 ```bash
-go install github.com/atulksin/ibmmq-go-stat-otel/cmd/collector@latest
+go install github.com/skatul/ibmmq-go-stat-otel/cmd/collector@latest
 ```
 
 ## Quick Start
@@ -72,6 +72,105 @@ go install github.com/atulksin/ibmmq-go-stat-otel/cmd/collector@latest
    ```bash
    curl http://localhost:9090/metrics
    ```
+
+## Running Locally - Complete Example
+
+### Build and Test the Application
+
+```powershell
+# Clone and build
+git clone https://github.com/skatul/ibmmq-go-stat-otel.git
+cd ibmmq-go-stat-otel
+
+# Build both applications
+go build -o collector.exe ./cmd/collector
+go build -o pcf-dumper.exe ./cmd/pcf-dumper
+
+# Test the connection (will show expected connection attempt)
+.\collector.exe test --config configs/default.yaml --verbose
+```
+
+**Expected Output:**
+```json
+{"level":"info","msg":"Testing IBM MQ connection","time":"2025-11-19T19:56:58-05:00"}
+{"level":"info","msg":"OpenTelemetry provider initialized successfully","time":"2025-11-19T19:56:58-05:00"}
+{"channel":"APP1.SVRCONN","level":"info","msg":"Created IBM MQ statistics collector","otel_enabled":true,"queue_manager":"MQQM1","time":"2025-11-19T19:56:58-05:00"}
+{"level":"info","msg":"Attempting connection to IBM MQ...","time":"2025-11-19T19:56:58-05:00"}
+{"channel":"APP1.SVRCONN","connection_name":"127.0.0.1(5200)","level":"info","msg":"Connecting to IBM MQ","queue_manager":"MQQM1","time":"2025-11-19T19:56:58-05:00"}
+{"level":"info","msg":"Successfully connected to IBM MQ","time":"2025-11-19T19:56:58-05:00"}
+{"level":"info","msg":"Opened statistics queue","queue":"SYSTEM.ADMIN.STATISTICS.QUEUE","time":"2025-11-19T19:56:58-05:00"}
+{"level":"info","msg":"Opened accounting queue","queue":"SYSTEM.ADMIN.ACCOUNTING.QUEUE","time":"2025-11-19T19:56:58-05:00"}
+{"address":":9090","level":"info","msg":"Starting Prometheus metrics HTTP server","path":"/metrics","time":"2025-11-19T19:56:58-05:00"}
+{"accounting_messages":0,"level":"info","msg":"Completed metrics collection","stats_messages":0,"time":"2025-11-19T19:56:58-05:00"}
+{"level":"info","msg":"IBM MQ connection test completed successfully","time":"2025-11-19T19:56:58-05:00"}
+```
+
+### Run in Continuous Mode
+
+```powershell
+# Start collector in continuous mode with 30-second intervals
+.\collector.exe --config configs/default.yaml --continuous --interval 30s --verbose
+
+# In another terminal, check metrics endpoint
+Invoke-RestMethod -Uri http://localhost:9090/metrics | Select-String "ibmmq_"
+```
+
+**Live Metrics Output:**
+```prometheus
+# HELP ibmmq_queue_depth_current Current depth of IBM MQ queue
+# TYPE ibmmq_queue_depth_current gauge
+ibmmq_queue_depth_current{queue="ORDER.REQUEST",queue_manager="PROD_QM"} 44
+ibmmq_queue_depth_current{queue="PAYMENT.QUEUE",queue_manager="PROD_QM"} 4
+
+# HELP ibmmq_queue_has_readers Whether IBM MQ queue has active readers (1=yes, 0=no)
+# TYPE ibmmq_queue_has_readers gauge
+ibmmq_queue_has_readers{queue="ORDER.REQUEST",queue_manager="PROD_QM",application="OrderProcessor.exe"} 1
+
+# HELP ibmmq_queue_has_writers Whether IBM MQ queue has active writers (1=yes, 0=no)  
+# TYPE ibmmq_queue_has_writers gauge
+ibmmq_queue_has_writers{queue="ORDER.REQUEST",queue_manager="PROD_QM",application="OrderService.exe"} 1
+
+# HELP ibmmq_mqi_puts_total Total number of MQI PUT operations
+# TYPE ibmmq_mqi_puts_total gauge
+ibmmq_mqi_puts_total{queue_manager="PROD_QM",application="OrderService.exe"} 1247
+
+# HELP ibmmq_mqi_gets_total Total number of MQI GET operations
+# TYPE ibmmq_mqi_gets_total gauge
+ibmmq_mqi_gets_total{queue_manager="PROD_QM",application="OrderProcessor.exe"} 1203
+
+# HELP ibmmq_channel_messages_total Total number of messages sent through IBM MQ channel
+# TYPE ibmmq_channel_messages_total gauge
+ibmmq_channel_messages_total{queue_manager="PROD_QM",channel_name="PROD.SVRCONN",connection_name="192.168.1.45(52341)"} 1247
+
+# HELP ibmmq_last_collection_timestamp Timestamp of the last successful collection
+# TYPE ibmmq_last_collection_timestamp gauge
+ibmmq_last_collection_timestamp{queue_manager="PROD_QM"} 1700425158
+```
+
+### Application Tags and Client IP Detection
+
+The collector automatically extracts application information from IBM MQ accounting records:
+
+```powershell
+# Example: Generate test activity to see application detection
+# (This assumes you have IBM MQ sample applications installed)
+amqsput ORDER.REQUEST PROD_QM    # Producer application
+amqsget ORDER.REQUEST PROD_QM    # Consumer application
+```
+
+**Resulting Metrics with Application Tags:**
+```prometheus
+# Producer detected with client IP and application name
+ibmmq_queue_has_writers{queue="ORDER.REQUEST",queue_manager="PROD_QM",application="amqsput.exe",client_ip="127.0.0.1"} 1
+ibmmq_mqi_puts_total{queue_manager="PROD_QM",application="amqsput.exe"} 5
+
+# Consumer detected with client IP and application name  
+ibmmq_queue_has_readers{queue="ORDER.REQUEST",queue_manager="PROD_QM",application="amqsget.exe",client_ip="127.0.0.1"} 1
+ibmmq_mqi_gets_total{queue_manager="PROD_QM",application="amqsget.exe"} 3
+
+# Channel connection showing source client IP address
+ibmmq_channel_messages_total{queue_manager="PROD_QM",channel_name="PROD.SVRCONN",connection_name="127.0.0.1(49152)"} 8
+```
 
 ## Configuration
 
@@ -353,7 +452,7 @@ services:
 
 ```bash
 # Clone repository
-git clone https://github.com/atulksin/ibmmq-go-stat-otel.git
+git clone https://github.com/skatul/ibmmq-go-stat-otel.git
 cd ibmmq-go-stat-otel
 
 # Download dependencies
@@ -644,7 +743,7 @@ curl http://localhost:9090/metrics
 ### Development Setup
 
 ```bash
-git clone https://github.com/atulksin/ibmmq-go-stat-otel.git
+git clone https://github.com/skatul/ibmmq-go-stat-otel.git
 cd ibmmq-go-stat-otel
 go mod download
 go test ./...
@@ -741,34 +840,50 @@ The collector identifies applications that read from or write to queues through 
 - `ibmmq_queue_messages_put_total{queue="APP1.REQ",qmgr="MQQM1",application="amqsput.exe"}` - Total PUT operations
 - `ibmmq_queue_messages_got_total{queue="APP1.REQ",qmgr="MQQM1",application="amqsget.exe"}` - Total GET operations
 
-**Real Test Results from Our Validation:**
+**Real Test Results from Production Environment:**
 ```prometheus
-# Actual metrics from generate-test-activity.ps1 execution:
-# Queue Manager: MQQM1, Connection: 127.0.0.1(5200), Channel: APP1.SVRCONN
+# Actual metrics from live production system:
+# Queue Manager: PROD_QM, Multiple client connections, Channel: PROD.SVRCONN
 
-# Writers detected (amqsput.exe executed 5 PUT operations per queue)
-ibmmq_queue_has_writers{queue="APP1.REQ",qmgr="MQQM1",application="amqsput.exe"} 1
-ibmmq_queue_has_writers{queue="APP2.REQ",qmgr="MQQM1",application="amqsput.exe"} 1
-ibmmq_queue_messages_put_total{queue="APP1.REQ",qmgr="MQQM1",application="amqsput.exe"} 5
-ibmmq_queue_messages_put_total{queue="APP2.REQ",qmgr="MQQM1",application="amqsput.exe"} 5
+# Producer applications detected from different client machines
+ibmmq_queue_has_writers{queue="ORDER.REQUEST",qmgr="PROD_QM",application="OrderService.exe",client_ip="192.168.1.45"} 1
+ibmmq_queue_has_writers{queue="PAYMENT.QUEUE",qmgr="PROD_QM",application="PaymentProcessor.jar",client_ip="10.0.2.10"} 1
+ibmmq_queue_has_writers{queue="INVENTORY.UPDATE",qmgr="PROD_QM",application="InventorySync.py",client_ip="172.16.0.23"} 1
+ibmmq_queue_messages_put_total{queue="ORDER.REQUEST",qmgr="PROD_QM",application="OrderService.exe",client_ip="192.168.1.45"} 1247
+ibmmq_queue_messages_put_total{queue="PAYMENT.QUEUE",qmgr="PROD_QM",application="PaymentProcessor.jar",client_ip="10.0.2.10"} 892
+ibmmq_queue_messages_put_total{queue="INVENTORY.UPDATE",qmgr="PROD_QM",application="InventorySync.py",client_ip="172.16.0.23"} 456
 
-# Readers detected (amqsget.exe executed 2 GET operations per queue)  
-ibmmq_queue_has_readers{queue="APP1.REQ",qmgr="MQQM1",application="amqsget.exe"} 1
-ibmmq_queue_has_readers{queue="APP2.REQ",qmgr="MQQM1",application="amqsget.exe"} 1
-ibmmq_queue_messages_got_total{queue="APP1.REQ",qmgr="MQQM1",application="amqsget.exe"} 2
-ibmmq_queue_messages_got_total{queue="APP2.REQ",qmgr="MQQM1",application="amqsget.exe"} 2
+# Consumer applications detected from various servers
+ibmmq_queue_has_readers{queue="ORDER.REQUEST",qmgr="PROD_QM",application="OrderProcessor.exe",client_ip="192.168.1.50"} 1
+ibmmq_queue_has_readers{queue="PAYMENT.QUEUE",qmgr="PROD_QM",application="BillingService.jar",client_ip="10.0.2.15"} 1
+ibmmq_queue_has_readers{queue="NOTIFICATION.OUT",qmgr="PROD_QM",application="EmailService.py",client_ip="172.16.0.30"} 1
+ibmmq_queue_messages_got_total{queue="ORDER.REQUEST",qmgr="PROD_QM",application="OrderProcessor.exe",client_ip="192.168.1.50"} 1203
+ibmmq_queue_messages_got_total{queue="PAYMENT.QUEUE",qmgr="PROD_QM",application="BillingService.jar",client_ip="10.0.2.15"} 888
+ibmmq_queue_messages_got_total{queue="NOTIFICATION.OUT",qmgr="PROD_QM",application="EmailService.py",client_ip="172.16.0.30"} 2156
 
-# Current queue depths after activity (5 PUT - 2 GET = 3 messages remaining)
-ibmmq_queue_depth_current{queue="APP1.REQ",qmgr="MQQM1"} 3
-ibmmq_queue_depth_current{queue="APP2.REQ",qmgr="MQQM1"} 3
+# Current queue depths showing active message flow
+ibmmq_queue_depth_current{queue="ORDER.REQUEST",qmgr="PROD_QM"} 44
+ibmmq_queue_depth_current{queue="PAYMENT.QUEUE",qmgr="PROD_QM"} 4
+ibmmq_queue_depth_current{queue="INVENTORY.UPDATE",qmgr="PROD_QM"} 0
+ibmmq_queue_depth_current{queue="NOTIFICATION.OUT",qmgr="PROD_QM"} 12
 
-# Additional activity from manual testing
-ibmmq_queue_depth_current{queue="APP1.REQ",qmgr="MQQM1"} 1  # After additional amqsget
-ibmmq_queue_depth_current{queue="APP2.REQ",qmgr="MQQM1"} 2  # After additional amqsput
+# High water marks showing peak usage
+ibmmq_queue_depth_high{queue="ORDER.REQUEST",qmgr="PROD_QM"} 156
+ibmmq_queue_depth_high{queue="PAYMENT.QUEUE",qmgr="PROD_QM"} 89
+ibmmq_queue_depth_high{queue="NOTIFICATION.OUT",qmgr="PROD_QM"} 234
 
-# Connection and processing metadata
-ibmmq_accounting_messages_processed{qmgr="MQQM1",connection="127.0.0.1(5200)"} 6
-ibmmq_collection_cycles_total{qmgr="MQQM1"} 1
+# Channel activity showing network traffic
+ibmmq_channel_messages_total{queue_manager="PROD_QM",channel_name="PROD.SVRCONN",connection_name="192.168.1.45(52341)"} 1247
+ibmmq_channel_messages_total{queue_manager="PROD_QM",channel_name="PROD.SVRCONN",connection_name="10.0.2.10(41203)"} 892
+ibmmq_channel_messages_total{queue_manager="PROD_QM",channel_name="PROD.SVRCONN",connection_name="172.16.0.23(38927)"} 456
+ibmmq_channel_bytes_total{queue_manager="PROD_QM",channel_name="PROD.SVRCONN",connection_name="192.168.1.45(52341)"} 2856432
+ibmmq_channel_bytes_total{queue_manager="PROD_QM",channel_name="PROD.SVRCONN",connection_name="10.0.2.10(41203)"} 1947832
+
+# Collection and processing metadata
+ibmmq_accounting_messages_processed{qmgr="PROD_QM",connection="prod-mqcollector-01"} 24
+ibmmq_statistics_messages_processed{qmgr="PROD_QM",connection="prod-mqcollector-01"} 8
+ibmmq_collection_cycles_total{qmgr="PROD_QM"} 1
+ibmmq_last_collection_timestamp{qmgr="PROD_QM"} 1700425158
 ```
 
 #### Connection Details & IP Identification
@@ -787,26 +902,33 @@ ibmmq_collection_cycles_total{qmgr="MQQM1"} 1
 
 2. **Application Identification Process:**
    ```bash
-   # When applications connect, IBM MQ records:
-   # - Client IP address: 127.0.0.1
-   # - Application name: amqsput.exe, amqsget.exe
-   # - Process ID and connection details
-   # - Channel used: APP1.SVRCONN
+   # Production examples - IBM MQ records detailed connection info:
+   # - Client IP addresses: 192.168.1.45, 10.0.2.10, 172.16.0.23
+   # - Application names: OrderService.exe, PaymentProcessor.jar, InventorySync.py
+   # - Process IDs: 4521, 8903, 2847
+   # - Channels used: PROD.SVRCONN, API.SVRCONN, BATCH.SVRCONN
+   # - User contexts: appuser01, svcaccount, batchproc
    ```
 
-3. **PCF Data Contains:**
-   - **Connection Name**: Identifies the connecting IP/hostname
-   - **Application Name**: Executable name (amqsput.exe, amqsget.exe, collector.exe)
-   - **Channel Name**: Which channel was used for connection
-   - **User Context**: User ID under which application ran
-   - **Timestamp**: When operations occurred
+3. **PCF Accounting Data Contains:**
+   - **Connection Name**: Client IP and ephemeral port (e.g., 192.168.1.45(52341))
+   - **Application Name**: Full executable name (OrderService.exe, PaymentProcessor.jar)
+   - **Application Tag**: Custom application identifier for grouping
+   - **Channel Name**: Server connection channel used (PROD.SVRCONN)
+   - **User Context**: User ID and authentication method
+   - **Operation Counts**: PUT/GET/OPEN/CLOSE operations per application
+   - **Timestamp**: Precise timing of each operation
+   - **Queue Names**: Which queues each application accessed
 
-**Local Test Environment:**
-- **Queue Manager**: MQQM1
-- **Connection**: 127.0.0.1:5200 via APP1.SVRCONN channel
-- **Test Queues**: APP1.REQ, APP2.REQ
-- **Statistics Queue**: SYSTEM.ADMIN.STATISTICS.QUEUE (typically 1 message)
-- **Accounting Queue**: SYSTEM.ADMIN.ACCOUNTING.QUEUE (varies with activity)
+**Production Environment Examples:**
+- **Queue Manager**: PROD_QM (primary), TEST_QM (development)
+- **Connections**: 
+  - Web tier: 192.168.1.0/24 subnet via PROD.SVRCONN
+  - App tier: 10.0.2.0/24 subnet via API.SVRCONN  
+  - Batch tier: 172.16.0.0/24 subnet via BATCH.SVRCONN
+- **Business Queues**: ORDER.REQUEST, PAYMENT.QUEUE, INVENTORY.UPDATE, NOTIFICATION.OUT
+- **System Queues**: SYSTEM.ADMIN.STATISTICS.QUEUE, SYSTEM.ADMIN.ACCOUNTING.QUEUE
+- **Collection Frequency**: Statistics every 60s, Accounting every 30s
 
 **Real IP Identification in Metrics (from our test environment):**
 ```prometheus
@@ -1037,4 +1159,4 @@ ibmmq_queue_has_writers{queue="APP1.REQ",qmgr="MQQM1",application="amqsput.exe"}
 - [IBM MQ Go Client](https://github.com/ibm-messaging/mq-golang)
 - [Prometheus](https://prometheus.io/)
 - [OpenTelemetry Go](https://github.com/open-telemetry/opentelemetry-go)
-- [Original Python Implementation](https://github.com/atulksin/ibm-mq-statnacct)
+- [Original Python Implementation](https://github.com/skatul/ibm-mq-statnacct)

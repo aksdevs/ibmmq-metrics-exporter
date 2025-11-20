@@ -8,75 +8,75 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
-// PCF Parameter Types
+// PCF Command Format Types (MQCFT_*)
 const (
-	MQCFT_NONE               = 0x00000000
-	MQCFT_COMMAND            = 0x00000001
-	MQCFT_RESPONSE           = 0x00000002
-	MQCFT_INTEGER            = 0x00000003
-	MQCFT_STRING             = 0x00000004
-	MQCFT_INTEGER_LIST       = 0x00000005
-	MQCFT_STRING_LIST        = 0x00000006
-	MQCFT_EVENT              = 0x00000007
-	MQCFT_USER               = 0x00000008
-	MQCFT_BYTE_STRING        = 0x00000009
-	MQCFT_TRACE_ROUTE        = 0x0000000A
-	MQCFT_REPORT             = 0x0000000B
-	MQCFT_INTEGER_FILTER     = 0x0000000C
-	MQCFT_STRING_FILTER      = 0x0000000D
-	MQCFT_BYTE_STRING_FILTER = 0x0000000E
-	MQCFT_COMMAND_XR         = 0x0000000F
-	MQCFT_XR_MSG             = 0x00000010
-	MQCFT_XR_ITEM            = 0x00000011
-	MQCFT_XR_SUMMARY         = 0x00000012
-	MQCFT_GROUP              = 0x00000013
-	MQCFT_STATISTICS         = 0x00000014
-	MQCFT_ACCOUNTING         = 0x00000015
+	MQCFT_NONE               = 0
+	MQCFT_COMMAND            = 1
+	MQCFT_RESPONSE           = 2
+	MQCFT_INTEGER            = 3
+	MQCFT_STRING             = 4
+	MQCFT_INTEGER_LIST       = 5
+	MQCFT_STRING_LIST        = 6
+	MQCFT_EVENT              = 7
+	MQCFT_USER               = 8
+	MQCFT_BYTE_STRING        = 9
+	MQCFT_TRACE_ROUTE        = 10
+	MQCFT_REPORT             = 11
+	MQCFT_INTEGER_FILTER     = 12
+	MQCFT_STRING_FILTER      = 13
+	MQCFT_BYTE_STRING_FILTER = 14
+	MQCFT_COMMAND_XR         = 16
+	MQCFT_XR_MSG             = 17
+	MQCFT_XR_ITEM            = 18
+	MQCFT_XR_SUMMARY         = 19
+	MQCFT_GROUP              = 20
+	MQCFT_STATISTICS         = 21
+	MQCFT_ACCOUNTING         = 22
 )
 
 // Common IBM MQ Constants
 const (
-	// Statistics Types
-	MQCMD_STATISTICS_MQI     = 0x00000070
-	MQCMD_STATISTICS_Q       = 0x00000071
-	MQCMD_STATISTICS_CHANNEL = 0x00000072
+	// Statistics Types (MQCMD_*)
+	MQCMD_STATISTICS_MQI     = 112 // 0x70
+	MQCMD_STATISTICS_Q       = 113 // 0x71
+	MQCMD_STATISTICS_CHANNEL = 114 // 0x72
 
-	// Accounting Types
-	MQCMD_ACCOUNTING_MQI = 0x0000008A
-	MQCMD_ACCOUNTING_Q   = 0x0000008B
+	// Accounting Types (MQCMD_*)
+	MQCMD_ACCOUNTING_MQI = 138 // 0x8A
+	MQCMD_ACCOUNTING_Q   = 139 // 0x8B
 
-	// Common Parameters
-	MQCA_Q_NAME            = 2016
-	MQCA_Q_MGR_NAME        = 2002
-	MQCA_CHANNEL_NAME      = 3501
-	MQCA_CONNECTION_NAME   = 3502
-	MQCA_APPL_NAME         = 2024
-	MQIA_Q_TYPE            = 20
-	MQIA_CURRENT_Q_DEPTH   = 3
-	MQIA_OPEN_INPUT_COUNT  = 65
-	MQIA_OPEN_OUTPUT_COUNT = 66
+	// Common Parameters (MQCA_*, MQIA_*)
+	MQCA_Q_NAME            = 2016 // Queue name
+	MQCA_Q_MGR_NAME        = 2002 // Queue manager name
+	MQCA_CHANNEL_NAME      = 3501 // Channel name
+	MQCA_CONNECTION_NAME   = 3502 // Connection name
+	MQCA_APPL_NAME         = 2024 // Application name
+	MQIA_Q_TYPE            = 20   // Queue type
+	MQIA_CURRENT_Q_DEPTH   = 3    // Current queue depth
+	MQIA_OPEN_INPUT_COUNT  = 65   // Open input count
+	MQIA_OPEN_OUTPUT_COUNT = 66   // Open output count
 
-	// Queue Statistics
-	MQIA_HIGH_Q_DEPTH  = 36
+	// Queue Statistics (MQIA_*)
+	MQIA_HIGH_Q_DEPTH  = 36 // High queue depth
 	MQIA_MSG_DEQ_COUNT = 38 // Messages dequeued (GET count)
 	MQIA_MSG_ENQ_COUNT = 37 // Messages enqueued (PUT count)
 
-	// Channel Statistics
-	MQIACH_MSGS    = 1501
-	MQIACH_BYTES   = 1502
-	MQIACH_BATCHES = 1503
+	// Channel Statistics (MQIACH_*)
+	MQIACH_MSGS    = 1501 // Channel messages
+	MQIACH_BYTES   = 1502 // Channel bytes
+	MQIACH_BATCHES = 1503 // Channel batches
 
-	// MQI Statistics
-	MQIAMO_OPENS    = 3
-	MQIAMO_CLOSES   = 4
-	MQIAMO_PUTS     = 17
-	MQIAMO_GETS     = 18
-	MQIAMO_COMMITS  = 12
-	MQIAMO_BACKOUTS = 13
+	// MQI Statistics (MQIAMO_*)
+	MQIAMO_OPENS    = 3  // MQI opens
+	MQIAMO_CLOSES   = 4  // MQI closes
+	MQIAMO_PUTS     = 17 // MQI puts
+	MQIAMO_GETS     = 18 // MQI gets
+	MQIAMO_COMMITS  = 12 // MQI commits
+	MQIAMO_BACKOUTS = 13 // MQI backouts
 
-	// Time parameters
-	MQCACF_COMMAND_TIME    = 3603
-	MQIACF_SEQUENCE_NUMBER = 1001
+	// Time and Control Parameters (MQCACF_*, MQIACF_*)
+	MQCACF_COMMAND_TIME    = 3603 // Command time
+	MQIACF_SEQUENCE_NUMBER = 1001 // Sequence number
 )
 
 // PCFHeader represents the PCF message header

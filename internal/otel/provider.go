@@ -6,10 +6,10 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/atulksin/ibmmq-go-stat-otel/pkg/config"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
+	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
 )
 
 // OTelProvider manages OpenTelemetry metrics provider and Prometheus exporter
