@@ -136,6 +136,10 @@ func TestPCFParser_ParseMQIStats(t *testing.T) {
 
 	parameters := []*PCFParameter{
 		{Parameter: MQCA_APPL_NAME, Type: MQCFT_STRING, Value: "TestApp"},
+		{Parameter: MQCACF_APPL_TAG, Type: MQCFT_STRING, Value: "v1.2.3"},
+		{Parameter: MQCACF_USER_IDENTIFIER, Type: MQCFT_STRING, Value: "testuser"},
+		{Parameter: MQCACH_CONNECTION_NAME, Type: MQCFT_STRING, Value: "192.168.1.100"},
+		{Parameter: MQCA_CHANNEL_NAME, Type: MQCFT_STRING, Value: "APP.SVRCONN"},
 		{Parameter: MQIAMO_OPENS, Type: MQCFT_INTEGER, Value: int32(10)},
 		{Parameter: MQIAMO_CLOSES, Type: MQCFT_INTEGER, Value: int32(8)},
 		{Parameter: MQIAMO_PUTS, Type: MQCFT_INTEGER, Value: int32(500)},
@@ -148,6 +152,10 @@ func TestPCFParser_ParseMQIStats(t *testing.T) {
 	require.NotNil(t, stats)
 
 	assert.Equal(t, "TestApp", stats.ApplicationName)
+	assert.Equal(t, "v1.2.3", stats.ApplicationTag)
+	assert.Equal(t, "testuser", stats.UserIdentifier)
+	assert.Equal(t, "192.168.1.100", stats.ConnectionName)
+	assert.Equal(t, "APP.SVRCONN", stats.ChannelName)
 	assert.Equal(t, int32(10), stats.Opens)
 	assert.Equal(t, int32(8), stats.Closes)
 	assert.Equal(t, int32(500), stats.Puts)

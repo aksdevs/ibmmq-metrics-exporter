@@ -6,11 +6,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/config"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/mqclient"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/pcf"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/mqclient"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/pcf"
 )
 
 // MetricsCollector handles collection and export of IBM MQ metrics to Prometheus
@@ -52,6 +52,20 @@ type MetricsCollector struct {
 func NewMetricsCollector(cfg *config.Config, mqClient *mqclient.MQClient, logger *logrus.Logger) *MetricsCollector {
 	registry := prometheus.NewRegistry()
 
+	collector := &MetricsCollector{
+		config:    cfg,
+		mqClient:  mqClient,
+		pcfParser: pcf.NewParser(logger),
+		logger:    logger,
+		registry:  registry,
+	}
+
+	collector.initMetrics()
+	return collector
+}
+
+// NewMetricsCollectorWithRegistry creates a new Prometheus metrics collector with an existing registry
+func NewMetricsCollectorWithRegistry(cfg *config.Config, mqClient *mqclient.MQClient, logger *logrus.Logger, registry *prometheus.Registry) *MetricsCollector {
 	collector := &MetricsCollector{
 		config:    cfg,
 		mqClient:  mqClient,
@@ -189,7 +203,7 @@ func (c *MetricsCollector) initMetrics() {
 			Name:      "mqi_opens_total",
 			Help:      "Total number of MQI OPEN operations",
 		},
-		[]string{"queue_manager", "application_name"},
+		[]string{"queue_manager", "application_name", "application_tag", "user_identifier", "connection_name", "channel_name"},
 	)
 
 	c.mqiClosesGauge = prometheus.NewGaugeVec(
@@ -199,7 +213,7 @@ func (c *MetricsCollector) initMetrics() {
 			Name:      "mqi_closes_total",
 			Help:      "Total number of MQI CLOSE operations",
 		},
-		[]string{"queue_manager", "application_name"},
+		[]string{"queue_manager", "application_name", "application_tag", "user_identifier", "connection_name", "channel_name"},
 	)
 
 	c.mqiPutsGauge = prometheus.NewGaugeVec(
@@ -209,7 +223,7 @@ func (c *MetricsCollector) initMetrics() {
 			Name:      "mqi_puts_total",
 			Help:      "Total number of MQI PUT operations",
 		},
-		[]string{"queue_manager", "application_name"},
+		[]string{"queue_manager", "application_name", "application_tag", "user_identifier", "connection_name", "channel_name"},
 	)
 
 	c.mqiGetsGauge = prometheus.NewGaugeVec(
@@ -219,7 +233,7 @@ func (c *MetricsCollector) initMetrics() {
 			Name:      "mqi_gets_total",
 			Help:      "Total number of MQI GET operations",
 		},
-		[]string{"queue_manager", "application_name"},
+		[]string{"queue_manager", "application_name", "application_tag", "user_identifier", "connection_name", "channel_name"},
 	)
 
 	c.mqiCommitsGauge = prometheus.NewGaugeVec(
@@ -229,7 +243,7 @@ func (c *MetricsCollector) initMetrics() {
 			Name:      "mqi_commits_total",
 			Help:      "Total number of MQI COMMIT operations",
 		},
-		[]string{"queue_manager", "application_name"},
+		[]string{"queue_manager", "application_name", "application_tag", "user_identifier", "connection_name", "channel_name"},
 	)
 
 	c.mqiBackoutsGauge = prometheus.NewGaugeVec(
@@ -239,7 +253,7 @@ func (c *MetricsCollector) initMetrics() {
 			Name:      "mqi_backouts_total",
 			Help:      "Total number of MQI BACKOUT operations",
 		},
-		[]string{"queue_manager", "application_name"},
+		[]string{"queue_manager", "application_name", "application_tag", "user_identifier", "connection_name", "channel_name"},
 	)
 
 	// Collection info metrics
@@ -309,8 +323,8 @@ func (c *MetricsCollector) CollectMetrics(ctx context.Context) error {
 	// Update metrics from collected data
 	c.updateMetricsFromMessages(statsMessages, accountingMessages)
 
-	// Update collection timestamp
-	c.lastCollectionTime.WithLabelValues(c.config.MQ.QueueManager).Set(float64(time.Now().Unix()))
+	// Update collection timestamp and baseline metrics
+	c.setBaselineMetrics(len(statsMessages), len(accountingMessages))
 
 	c.logger.WithFields(logrus.Fields{
 		"stats_messages":      len(statsMessages),
@@ -410,7 +424,14 @@ func (c *MetricsCollector) processStatisticsMessage(msg *mqclient.MQMessage) {
 
 	// Update MQI statistics
 	if mqiStats := stats.MQIStats; mqiStats != nil {
-		labels := []string{qmgr, mqiStats.ApplicationName}
+		labels := []string{
+			qmgr,
+			mqiStats.ApplicationName,
+			mqiStats.ApplicationTag,
+			mqiStats.UserIdentifier,
+			mqiStats.ConnectionName,
+			mqiStats.ChannelName,
+		}
 
 		c.mqiOpensGauge.WithLabelValues(labels...).Set(float64(mqiStats.Opens))
 		c.mqiClosesGauge.WithLabelValues(labels...).Set(float64(mqiStats.Closes))
@@ -443,11 +464,20 @@ func (c *MetricsCollector) processAccountingMessage(msg *mqclient.MQMessage) {
 	// Update MQI operation counts from accounting data
 	if ops := acct.Operations; ops != nil {
 		appName := ""
+		appTag := ""
+		userID := ""
+		connName := ""
+		chanName := ""
+
 		if acct.ConnectionInfo != nil {
 			appName = acct.ConnectionInfo.ApplicationName
+			appTag = acct.ConnectionInfo.ApplicationTag
+			userID = acct.ConnectionInfo.UserIdentifier
+			connName = acct.ConnectionInfo.ConnectionName
+			chanName = acct.ConnectionInfo.ChannelName
 		}
 
-		labels := []string{qmgr, appName}
+		labels := []string{qmgr, appName, appTag, userID, connName, chanName}
 
 		c.mqiOpensGauge.WithLabelValues(labels...).Add(float64(ops.Opens))
 		c.mqiClosesGauge.WithLabelValues(labels...).Add(float64(ops.Closes))
@@ -461,6 +491,17 @@ func (c *MetricsCollector) processAccountingMessage(msg *mqclient.MQMessage) {
 // GetRegistry returns the Prometheus registry
 func (c *MetricsCollector) GetRegistry() *prometheus.Registry {
 	return c.registry
+}
+
+// setBaselineMetrics sets basic metrics that should always be present
+func (c *MetricsCollector) setBaselineMetrics(statsCount, accountingCount int) {
+	qmgr := c.config.MQ.QueueManager
+
+	// Always set collection timestamp
+	c.lastCollectionTime.WithLabelValues(qmgr).Set(float64(time.Now().Unix()))
+
+	// Set collection info metric
+	c.collectionInfoGauge.WithLabelValues(qmgr, c.config.MQ.Channel, "1.0.0").Set(1)
 }
 
 // ResetMetrics clears all metrics

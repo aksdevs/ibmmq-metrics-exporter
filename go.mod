@@ -1,4 +1,4 @@
-module github.com/skatul/ibmmq-go-stat-otel
+module github.com/aksdevs/ibmmq-go-stat-otel
 
 go 1.24
 

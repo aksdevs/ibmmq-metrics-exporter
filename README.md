@@ -1,22 +1,22 @@
 # IBM MQ Statistics and Accounting Collector
 
-[![Go Report Card](https://goreportcard.com/badge/github.com/skatul/ibmmq-go-stat-otel)](https://goreportcard.com/report/github.com/skatul/ibmmq-go-stat-otel)
+[![Go Report Card](https://goreportcard.com/badge/github.com/aksdevs/ibmmq-go-stat-otel)](https://goreportcard.com/report/github.com/aksdevs/ibmmq-go-stat-otel)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 A high-performance Go application that collects IBM MQ statistics and accounting data from IBM MQ queue managers and exposes them as Prometheus metrics with OpenTelemetry observability.
 
 ## Features
 
-🚀 **High Performance**: Built in Go with efficient IBM MQ client integration  
-📊 **Prometheus Metrics**: Exposes all IBM MQ stats as Prometheus gauges with `ibmmq` prefix  
-🔍 **Reader/Writer Detection**: Identifies applications that read from or write to queues  
-� **OpenTelemetry**: Full observability with distributed tracing  
-⚙️ **Flexible Configuration**: YAML configuration with dynamic connection building  
-🐳 **Docker Ready**: Multi-stage Docker builds with BuildKit optimization  
-🔄 **Multiple Modes**: One-time collection or continuous monitoring  
-📈 **Rich Metrics**: Statistics and accounting data from IBM MQ queues  
-🛡️ **Robust**: Comprehensive error handling and logging  
-🧪 **Testing Tools**: Includes scripts to generate test activity on multiple platforms
+- **High Performance**: Built in Go with efficient IBM MQ client integration
+- **Prometheus Metrics**: Exposes all IBM MQ stats as Prometheus gauges with `ibmmq` prefix
+- **Reader/Writer Detection**: Identifies applications that read from or write to queues
+- **OpenTelemetry**: Full observability with distributed tracing
+- **Flexible Configuration**: YAML configuration with dynamic connection building
+- **Docker Ready**: Multi-stage Docker builds with BuildKit optimization
+- **Multiple Modes**: One-time collection or continuous monitoring
+- **Rich Metrics**: Statistics and accounting data from IBM MQ queues
+- **Robust**: Comprehensive error handling and logging
+- **Testing Tools**: Includes scripts to generate test activity on multiple platforms
 
 ## Prerequisites
 
@@ -30,7 +30,7 @@ A high-performance Go application that collects IBM MQ statistics and accounting
 ### From Source
 
 ```bash
-git clone https://github.com/skatul/ibmmq-go-stat-otel.git
+git clone https://github.com/aksdevs/ibmmq-go-stat-otel.git
 cd ibmmq-go-stat-otel
 go build -o ibmmq-collector ./cmd/collector
 ```
@@ -38,7 +38,7 @@ go build -o ibmmq-collector ./cmd/collector
 ### Using Go Install
 
 ```bash
-go install github.com/skatul/ibmmq-go-stat-otel/cmd/collector@latest
+go install github.com/aksdevs/ibmmq-go-stat-otel/cmd/collector@latest
 ```
 
 ## Quick Start
@@ -70,7 +70,7 @@ go install github.com/skatul/ibmmq-go-stat-otel/cmd/collector@latest
 
 5. **View Metrics**:
    ```bash
-   curl http://localhost:9090/metrics
+   curl http://localhost:9091/metrics
    ```
 
 ## Running Locally - Complete Example
@@ -79,7 +79,7 @@ go install github.com/skatul/ibmmq-go-stat-otel/cmd/collector@latest
 
 ```powershell
 # Clone and build
-git clone https://github.com/skatul/ibmmq-go-stat-otel.git
+git clone https://github.com/aksdevs/ibmmq-go-stat-otel.git
 cd ibmmq-go-stat-otel
 
 # Build both applications
@@ -112,7 +112,7 @@ go build -o pcf-dumper.exe ./cmd/pcf-dumper
 .\collector.exe --config configs/default.yaml --continuous --interval 30s --verbose
 
 # In another terminal, check metrics endpoint
-Invoke-RestMethod -Uri http://localhost:9090/metrics | Select-String "ibmmq_"
+Invoke-RestMethod -Uri http://localhost:9091/metrics | Select-String "ibmmq_"
 ```
 
 **Live Metrics Output:**
@@ -132,11 +132,11 @@ ibmmq_queue_has_writers{queue="ORDER.REQUEST",queue_manager="PROD_QM",applicatio
 
 # HELP ibmmq_mqi_puts_total Total number of MQI PUT operations
 # TYPE ibmmq_mqi_puts_total gauge
-ibmmq_mqi_puts_total{queue_manager="PROD_QM",application="OrderService.exe"} 1247
+ibmmq_mqi_puts_total{queue_manager="MQQM1",application_name="amqsput.exe",application_tag="",user_identifier="atulk",connection_name="127.0.0.1",channel_name="APP1.SVRCONN"} 5
 
 # HELP ibmmq_mqi_gets_total Total number of MQI GET operations
 # TYPE ibmmq_mqi_gets_total gauge
-ibmmq_mqi_gets_total{queue_manager="PROD_QM",application="OrderProcessor.exe"} 1203
+ibmmq_mqi_gets_total{queue_manager="MQQM1",application_name="amqsget.exe",application_tag="",user_identifier="atulk",connection_name="127.0.0.1",channel_name="APP1.SVRCONN"} 4
 
 # HELP ibmmq_channel_messages_total Total number of messages sent through IBM MQ channel
 # TYPE ibmmq_channel_messages_total gauge
@@ -195,7 +195,7 @@ collector:
   continuous: false
 
 prometheus:
-  port: 9090
+  port: 9091
   path: "/metrics"
   namespace: "ibmmq"
   subsystem: ""
@@ -300,6 +300,15 @@ The collector exposes the following metrics with the `ibmmq` namespace:
 
 ### MQI Operation Metrics
 
+All MQI metrics include 6 labels for detailed application tracking:
+- `queue_manager` - IBM MQ Queue Manager name
+- `application_name` - Name of the application performing MQI operations
+- `application_tag` - Custom application tag/version identifier
+- `user_identifier` - User ID performing the operation
+- `connection_name` - Client connection IP address
+- `channel_name` - MQ channel name used for the connection
+
+Metrics:
 - `ibmmq_mqi_opens_total` - Total number of MQI OPEN operations
 - `ibmmq_mqi_closes_total` - Total number of MQI CLOSE operations
 - `ibmmq_mqi_puts_total` - Total number of MQI PUT operations
@@ -316,11 +325,22 @@ The collector exposes the following metrics with the `ibmmq` namespace:
 
 All metrics include relevant labels:
 
+**Queue Metrics:**
 - `queue_manager` - IBM MQ Queue Manager name
-- `queue_name` - Queue name (for queue metrics)
-- `channel_name` - Channel name (for channel metrics)
-- `connection_name` - Connection name (for channel metrics)
-- `application_name` - Application name (for MQI metrics)
+- `queue_name` - Queue name
+
+**Channel Metrics:**
+- `queue_manager` - IBM MQ Queue Manager name
+- `channel_name` - Channel name
+- `connection_name` - Connection name/IP
+
+**MQI Operation Metrics (6 labels for detailed tracking):**
+- `queue_manager` - IBM MQ Queue Manager name
+- `application_name` - Name of the application (e.g., "OrderService.exe", "amqsput.exe")
+- `application_tag` - Custom application tag or version identifier
+- `user_identifier` - User ID context of the application
+- `connection_name` - Client connection IP address (e.g., "192.168.1.45")
+- `channel_name` - MQ channel used (e.g., "APP1.SVRCONN")
 
 ## Prometheus Configuration
 
@@ -330,7 +350,7 @@ Add the following to your `prometheus.yml`:
 scrape_configs:
   - job_name: 'ibmmq-collector'
     static_configs:
-      - targets: ['localhost:9090']
+      - targets: ['localhost:9091']
     metrics_path: '/metrics'
     scrape_interval: 30s
 ```
@@ -399,14 +419,14 @@ docker build \
 ```
 
 #### Dockerfile Features:
-- 🏗️ **Multi-stage build** for minimal final image size
-- ⚙️ **Configurable IBM MQ paths** supporting Windows/Linux installations
-- 🔧 **64-bit GCC compilation** with proper library linking
-- 🚀 **BuildKit optimization** with mount caches for faster builds
-- 🧪 **Parallel test execution** during build process
-- 🛡️ **Security hardening** with non-root user
-- 📦 **Minimal runtime** based on Debian Bullseye slim
-- 🔄 **Fallback mechanisms** for missing MQ installations
+- Multi-stage build for minimal final image size
+- Configurable IBM MQ paths supporting Windows/Linux installations
+- 64-bit GCC compilation with proper library linking
+- BuildKit optimization with mount caches for faster builds
+- Parallel test execution during build process
+- Security hardening with non-root user
+- Minimal runtime based on Debian Bullseye slim
+- Fallback mechanisms for missing MQ installations
 
 ### Docker Compose
 
@@ -416,7 +436,7 @@ services:
   ibmmq-collector:
     build: .
     ports:
-      - "9090:9090"
+      - "9091:9091"
     environment:
       - IBMMQ_QUEUE_MANAGER=MQQM1
       - IBMMQ_CHANNEL=APP1.SVRCONN
@@ -428,7 +448,7 @@ services:
   prometheus:
     image: prom/prometheus
     ports:
-      - "9091:9090"
+      - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
 ```
@@ -452,7 +472,7 @@ services:
 
 ```bash
 # Clone repository
-git clone https://github.com/skatul/ibmmq-go-stat-otel.git
+git clone https://github.com/aksdevs/ibmmq-go-stat-otel.git
 cd ibmmq-go-stat-otel
 
 # Download dependencies
@@ -518,10 +538,10 @@ source /opt/mqm/bin/setmqenv -s
 ```
 
 These scripts:
-- ✅ Create **writer activity** using `amqsput` (generates opprocs statistics)
-- ✅ Create **reader activity** using `amqsget` (generates ipprocs statistics)  
-- ✅ Display queue status and depths
-- ✅ Work with any IBM MQ installation
+- Create writer activity using `amqsput` (generates opprocs statistics)
+- Create reader activity using `amqsget` (generates ipprocs statistics)
+- Display queue status and depths
+- Work with any IBM MQ installation
 
 After running the scripts, use the collector and PCF dumper to verify detection:
 ```bash
@@ -637,7 +657,7 @@ Flags:
       --log-level string      Log level (debug, info, warn, error) (default "info")
       --max-cycles int        Maximum number of collection cycles (0 = infinite)
       --otel                  Enable OpenTelemetry integration (default true)
-      --prometheus-port int   Prometheus metrics HTTP server port (default 9090)
+      --prometheus-port int   Prometheus metrics HTTP server port (default 9091)
       --reset-stats           Reset statistics after reading
   -v, --verbose               Enable verbose logging
       --version               version for ibmmq-collector
@@ -723,13 +743,13 @@ groups:
 
 ```bash
 # Check collector health
-curl http://localhost:9090/health
+curl http://localhost:9091/health
 
 # Check readiness
-curl http://localhost:9090/ready
+curl http://localhost:9091/ready
 
 # Check metrics endpoint
-curl http://localhost:9090/metrics
+curl http://localhost:9091/metrics
 ```
 
 ## Contributing
@@ -743,7 +763,7 @@ curl http://localhost:9090/metrics
 ### Development Setup
 
 ```bash
-git clone https://github.com/skatul/ibmmq-go-stat-otel.git
+git clone https://github.com/aksdevs/ibmmq-go-stat-otel.git
 cd ibmmq-go-stat-otel
 go mod download
 go test ./...
@@ -840,9 +860,8 @@ The collector identifies applications that read from or write to queues through 
 - `ibmmq_queue_messages_put_total{queue="APP1.REQ",qmgr="MQQM1",application="amqsput.exe"}` - Total PUT operations
 - `ibmmq_queue_messages_got_total{queue="APP1.REQ",qmgr="MQQM1",application="amqsget.exe"}` - Total GET operations
 
-**Real Test Results from Production Environment:**
+**Example from Production Environment:**
 ```prometheus
-# Actual metrics from live production system:
 # Queue Manager: PROD_QM, Multiple client connections, Channel: PROD.SVRCONN
 
 # Producer applications detected from different client machines
@@ -969,10 +988,10 @@ ibmmq_mqi_gets_total{
 ./ibmmq-collector test -c configs/default.yaml
 
 # Expected output includes:
-# ✅ Successfully connected to IBM MQ
-# ✅ Connection: 127.0.0.1(5200) via APP1.SVRCONN
-# ✅ Statistics queue accessible  
-# ✅ Accounting queue accessible
+# Successfully connected to IBM MQ
+# Connection: 127.0.0.1(5200) via APP1.SVRCONN
+# Statistics queue accessible
+# Accounting queue accessible
 ```
 
 **Live Connection Demonstration:**
@@ -981,9 +1000,9 @@ ibmmq_mqi_gets_total{
 ./sample-runs/generate-test-activity.ps1 -MessageCount 5
 
 # Output shows:
-# ✓ Put 5 messages to APP1.REQ (Writer: 127.0.0.1 via amqsput.exe)
-# ✓ Get 2 messages from APP1.REQ (Reader: 127.0.0.1 via amqsget.exe)  
-# ✓ 6 accounting messages generated with full connection details
+# Put 5 messages to APP1.REQ (Writer: 127.0.0.1 via amqsput.exe)
+# Get 2 messages from APP1.REQ (Reader: 127.0.0.1 via amqsget.exe)
+# 6 accounting messages generated with full connection details
 ```
 
 ### Testing & Validation
@@ -1073,10 +1092,10 @@ cd ibmmq-go-stat-otel
 .\sample-runs\generate-test-activity.ps1 -MessageCount 5
 
 # Output:
-# ✓ Put 5 messages to APP1.REQ (Writer activity)
-# ✓ Get 2 messages from APP1.REQ (Reader activity)  
-# ✓ Put 5 messages to APP2.REQ (Writer activity)
-# ✓ Get 2 messages from APP2.REQ (Reader activity)
+# Put 5 messages to APP1.REQ (Writer activity)
+# Get 2 messages from APP1.REQ (Reader activity)
+# Put 5 messages to APP2.REQ (Writer activity)
+# Get 2 messages from APP2.REQ (Reader activity)
 ```
 
 **2. Run Collector to Process Statistics:**
@@ -1085,9 +1104,9 @@ cd ibmmq-go-stat-otel
 .\collector.exe -c configs/default.yaml
 
 # Output shows:
-# ✅ Retrieved 6 accounting messages
-# ✅ Processed PUT/GET operations
-# ✅ Detected readers and writers
+# Retrieved 6 accounting messages
+# Processed PUT/GET operations
+# Detected readers and writers
 ```
 
 **3. Start Continuous Monitoring:**
@@ -1133,8 +1152,8 @@ ibmmq_last_collection_timestamp{qmgr="MQQM1"} 1699632915  # Unix timestamp from 
 ```
 
 **5. Interpretation Guide:**
-- **Reader Detection**: `ibmmq_queue_has_readers = 1` means applications are reading from queue
-- **Writer Detection**: `ibmmq_queue_has_writers = 1` means applications are writing to queue
+- Reader Detection: `ibmmq_queue_has_readers = 1` means applications are reading from queue
+- Writer Detection: `ibmmq_queue_has_writers = 1` means applications are writing to queue
 - **IP Identification**: Connection label shows `127.0.0.1(5200)` (local test environment)
 - **Application Tags**: The `application` label identifies the exact process:
   - `application="amqsput.exe"` - IBM MQ sample PUT program (writers)
@@ -1159,4 +1178,4 @@ ibmmq_queue_has_writers{queue="APP1.REQ",qmgr="MQQM1",application="amqsput.exe"}
 - [IBM MQ Go Client](https://github.com/ibm-messaging/mq-golang)
 - [Prometheus](https://prometheus.io/)
 - [OpenTelemetry Go](https://github.com/open-telemetry/opentelemetry-go)
-- [Original Python Implementation](https://github.com/skatul/ibm-mq-statnacct)
+- [Original Python Implementation](https://github.com/aksdevs/ibm-mq-statnacct)

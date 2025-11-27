@@ -102,7 +102,7 @@ func DefaultConfig() *Config {
 			Continuous:      false,
 		},
 		Prometheus: PrometheusConfig{
-			Port:       9090,
+			Port:       9091,
 			Path:       "/metrics",
 			Namespace:  "ibmmq",
 			Subsystem:  "",

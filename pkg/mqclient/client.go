@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/config"
 	ibmmq "github.com/ibm-messaging/mq-golang/v5/ibmmq"
 	"github.com/sirupsen/logrus"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
 )
 
 // MQClient represents an IBM MQ client connection

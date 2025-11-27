@@ -5,7 +5,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )

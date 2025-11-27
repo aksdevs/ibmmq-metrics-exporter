@@ -8,9 +8,9 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/collector"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/config"
 	"github.com/sirupsen/logrus"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/collector"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
 	"github.com/spf13/cobra"
 )
 

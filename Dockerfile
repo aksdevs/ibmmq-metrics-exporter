@@ -58,7 +58,7 @@ RUN echo "=== GCC Toolchain Verification ===" && \
     echo "Testing 64-bit compilation capability..." && \
     echo 'int main() { return sizeof(void*) == 8 ? 0 : 1; }' > /tmp/test64.c && \
     gcc -m64 -o /tmp/test64 /tmp/test64.c && /tmp/test64 && \
-    echo "✓ GCC 64-bit compilation verified"
+    echo "GCC 64-bit compilation verified"
 
 # Set up build environment for static builds (no CGO)
 ENV CGO_ENABLED=0 \
@@ -239,7 +239,7 @@ RUN echo "=== GCC Configuration ===" && \
     echo "Testing 64-bit compilation..." && \
     echo 'int main() { return sizeof(void*) == 8 ? 0 : 1; }' > /tmp/test64.c && \
     gcc -m64 -o /tmp/test64 /tmp/test64.c && /tmp/test64 && \
-    echo "✓ GCC 64-bit compilation confirmed" && \
+    echo "GCC 64-bit compilation confirmed" && \
     # Create compiler configuration
     echo "CC=gcc" > /tmp/final_compiler_config && \
     echo "CXX=g++" >> /tmp/final_compiler_config && \
@@ -264,7 +264,7 @@ RUN . /tmp/setup_build.sh && \
     echo "GOOS: $GOOS" && \
     echo "GOARCH: $GOARCH" && \
     go version && \
-    echo "✓ Static build environment configured"
+    echo "Static build environment configured"
 
 # Copy source code
 COPY . .
@@ -281,16 +281,16 @@ RUN --mount=type=cache,target=/go/pkg/mod \
     echo "" && \
     echo "Building collector..." && \
     go build -ldflags="-w -s" -o /app/bin/collector ./cmd/collector && \
-    echo "✓ Collector built successfully" && \
+    echo "Collector built successfully" && \
     echo "" && \
     echo "Building pcf-dumper..." && \
     go build -ldflags="-w -s" -o /app/bin/pcf-dumper ./cmd/pcf-dumper && \
-    echo "✓ PCF dumper built successfully" && \
+    echo "PCF dumper built successfully" && \
     echo "" && \
     echo "=== Binary Verification ===" && \
     file /app/bin/collector /app/bin/pcf-dumper && \
     ls -la /app/bin/ && \
-    echo "✓ Build completed successfully"
+    echo "Build completed successfully"
 
 # Test stage (runs in parallel with build)
 FROM builder AS test
@@ -340,10 +340,10 @@ ENV CONFIG_PATH="/etc/ibmmq-collector/config.yaml"
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD curl -f http://localhost:9090/metrics || exit 1
+    CMD curl -f http://localhost:9091/metrics || exit 1
 
 # Expose Prometheus metrics port
-EXPOSE 9090
+EXPOSE 9091
 
 # Switch to non-root user
 USER ibmmq
@@ -357,4 +357,4 @@ LABEL org.opencontainers.image.title="IBM MQ Statistics Collector"
 LABEL org.opencontainers.image.description="Prometheus collector for IBM MQ statistics and accounting data"
 LABEL org.opencontainers.image.vendor="IBM MQ Statistics Collector"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
-LABEL org.opencontainers.image.source="https://github.com/skatul/ibmmq-go-stat-otel"
+LABEL org.opencontainers.image.source="https://github.com/aksdevs/ibmmq-go-stat-otel"

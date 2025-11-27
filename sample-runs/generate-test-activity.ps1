@@ -2,89 +2,90 @@
 # This will create activity for statistics and accounting collection
 
 param(
-    [int]$MessageCount = 50,
+    [int]$MessageCount = 5,
     [string]$QueueManager = "MQQM1",
     [string]$Channel = "APP1.SVRCONN",
     [string]$ConnName = "127.0.0.1(5200)",
     [string[]]$Queues = @("APP1.REQ", "APP2.REQ")
 )
 
-Write-Host "Generating test activity on IBM MQ..."
+Write-Host "Generating test activity on IBM MQ..." -ForegroundColor Cyan
 Write-Host "Queue Manager: $QueueManager"
 Write-Host "Channel: $Channel"
 Write-Host "Connection: $ConnName"
 Write-Host "Queues: $($Queues -join ', ')"
 Write-Host "Messages per queue: $MessageCount"
+Write-Host ""
 
-# Create sample messages using runmqsc commands
+# Set environment variable for client connection
+$env:MQSERVER = "$Channel/TCP/$ConnName"
+
 $timestamp = Get-Date -Format "yyyy-MM-dd HH:mm:ss"
 
 foreach ($queue in $Queues) {
-    Write-Host "`nGenerating activity for queue: $queue"
+    Write-Host "Processing queue: $queue" -ForegroundColor Yellow
     
-    # Put messages using amqsput (the correct way)
-    Write-Host "Putting $MessageCount messages to $queue..."
+    # Put messages using amqsput
+    Write-Host "  Putting $MessageCount messages..."
     try {
-        $messages = @()
+        $messages = ""
         for ($i = 1; $i -le $MessageCount; $i++) {
-            $messages += "Test message $i for $queue - Generated at $timestamp"
+            $messages += "Test message $i for $queue - $timestamp`n"
         }
-        $messages += ""  # Empty line to terminate amqsput
+        $messages += "`n"  # Empty line to terminate amqsput
         
-        $putResult = $messages | & "C:\Program Files\IBM\MQ\bin64\amqsput.exe" $queue $QueueManager 2>&1
+        $messages | & "C:\Program Files\IBM\MQ\bin64\amqsput.exe" $queue $QueueManager 2>&1 | Out-Null
         
         if ($LASTEXITCODE -eq 0) {
-            Write-Host "Successfully put $MessageCount messages to $queue" -ForegroundColor Green
+            Write-Host "  Successfully put $MessageCount messages" -ForegroundColor Green
         } else {
-            Write-Host "Error putting messages to $queue (Exit code: $LASTEXITCODE)" -ForegroundColor Red
-            Write-Host $putResult
+            Write-Host "  Error putting messages (Exit code: $LASTEXITCODE)" -ForegroundColor Red
         }
     }
     catch {
-        Write-Host "Failed to execute amqsput: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Failed to execute amqsput: $($_.Exception.Message)" -ForegroundColor Red
     }
     
     # Get some messages back using amqsget to create GET statistics
-    $getCount = [Math]::Floor($MessageCount / 2) # Get half the messages back
-    Write-Host "Getting $getCount messages from $queue to create reader statistics..."
+    $getCount = [Math]::Max(1, [Math]::Floor($MessageCount / 2))
+    Write-Host "  Getting $getCount messages to create reader statistics..."
     
     try {
+        $retrieved = 0
         for ($i = 1; $i -le $getCount; $i++) {
-            $getResult = & "C:\Program Files\IBM\MQ\bin64\amqsget.exe" $queue $QueueManager 2>&1
-            if ($LASTEXITCODE -ne 0) {
-                Write-Host "No more messages available in $queue" -ForegroundColor Yellow
+            $output = & "C:\Program Files\IBM\MQ\bin64\amqsget.exe" $queue $QueueManager 2>&1
+            if ($LASTEXITCODE -eq 0 -and $output -notlike "*no more messages*") {
+                $retrieved++
+            } else {
                 break
             }
         }
-        Write-Host "Successfully retrieved messages from $queue" -ForegroundColor Green
+        if ($retrieved -gt 0) {
+            Write-Host "  Retrieved $retrieved messages" -ForegroundColor Green
+        } else {
+            Write-Host "  No messages retrieved" -ForegroundColor Yellow
+        }
     }
     catch {
-        Write-Host "Failed to execute amqsget: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Failed to execute amqsget: $($_.Exception.Message)" -ForegroundColor Red
     }
+    Write-Host ""
 }
 
 # Display queue depths
-Write-Host "`nChecking queue depths..."
-$depthScript = @"
-* Display queue depths
-DIS QUEUE('APP1.REQ') CURDEPTH MAXDEPTH
-DIS QUEUE('APP2.REQ') CURDEPTH MAXDEPTH
-* Display queue statistics
-DIS QUEUE('APP1.REQ') GET PUT
-DIS QUEUE('APP2.REQ') GET PUT
-"@
-
-$depthScriptFile = "sample-runs\check_queues.mqsc"
-$depthScript | Out-File -FilePath $depthScriptFile -Encoding ASCII
+Write-Host "Checking queue depths..." -ForegroundColor Cyan
+$depthScript = ""
+foreach ($queue in $Queues) {
+    $depthScript += "DISPLAY QLOCAL('$queue') CURDEPTH MAXDEPTH`n"
+}
 
 try {
-    Write-Host "`nQueue Status:"
-    $result = Get-Content $depthScriptFile | & "C:\Program Files\IBM\MQ\bin64\runmqsc" $QueueManager
-    Write-Host $result
+    $depthScript | & "C:\Program Files\IBM\MQ\bin64\runmqsc.exe" $QueueManager 2>&1 | Select-String -Pattern "CURDEPTH"
 }
 catch {
     Write-Host "Failed to check queue depths: $($_.Exception.Message)" -ForegroundColor Red
 }
 
-Write-Host "`nTest activity generation complete!"
-Write-Host "You can now run the IBM MQ collector to gather statistics from this activity."
+Write-Host ""
+Write-Host "Test activity generation complete!" -ForegroundColor Green
+Write-Host "You can now run the collector to gather statistics from this activity."

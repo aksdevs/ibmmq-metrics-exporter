@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/aksdevs/ibmmq-go-stat-otel/internal/otel"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/config"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/mqclient"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/pcf"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/prometheus"
 	"github.com/sirupsen/logrus"
-	"github.com/skatul/ibmmq-go-stat-otel/internal/otel"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/mqclient"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/pcf"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/prometheus"
 )
 
 // Collector is the main IBM MQ statistics collector
@@ -42,9 +42,6 @@ func NewCollector(cfg *config.Config, logger *logrus.Logger) (*Collector, error)
 	// Create PCF parser
 	pcfParser := pcf.NewParser(logger)
 
-	// Create Prometheus collector
-	prometheusCollector := prometheus.NewMetricsCollector(cfg, mqClient, logger)
-
 	// Create OpenTelemetry provider if enabled
 	var otelProvider *otel.OTelProvider
 	var err error
@@ -53,6 +50,14 @@ func NewCollector(cfg *config.Config, logger *logrus.Logger) (*Collector, error)
 		if err != nil {
 			return nil, fmt.Errorf("failed to create OTel provider: %w", err)
 		}
+	}
+
+	// Create Prometheus collector with the OTel registry if available
+	var prometheusCollector *prometheus.MetricsCollector
+	if otelProvider != nil {
+		prometheusCollector = prometheus.NewMetricsCollectorWithRegistry(cfg, mqClient, logger, otelProvider.GetRegistry())
+	} else {
+		prometheusCollector = prometheus.NewMetricsCollector(cfg, mqClient, logger)
 	}
 
 	collector := &Collector{

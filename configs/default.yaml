@@ -24,7 +24,10 @@ mq:
 # Collection Configuration
 collector:
   # Collection interval (0 or empty = one-time collection)
-  interval: "60s"
+  interval: "10s"
+
+  # Run in continuous mode (true = continuous, false = single collection)
+  continuous: true
 
   # Queue names to collect from
   stats_queue: "SYSTEM.ADMIN.STATISTICS.QUEUE"
@@ -40,12 +43,9 @@ collector:
   reset_statistics: false
 
 # Prometheus Metrics Configuration
-metrics:
-  # Enable metrics server
-  enabled: true
-
-  # HTTP server address and port
-  address: "0.0.0.0:9090"
+prometheus:
+  # HTTP server port
+  port: 9091
 
   # Metrics endpoint path
   path: "/metrics"
@@ -55,6 +55,9 @@ metrics:
 
   # Optional subsystem name
   subsystem: ""
+
+  # Enable OpenTelemetry integration
+  enable_otel: true
 
 # OpenTelemetry Configuration
 otel:

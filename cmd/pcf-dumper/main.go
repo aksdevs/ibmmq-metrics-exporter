@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"log"
 
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/config"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/mqclient"
 	"github.com/sirupsen/logrus"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/config"
-	"github.com/skatul/ibmmq-go-stat-otel/pkg/mqclient"
 )
 
 func main() {

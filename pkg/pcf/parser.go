@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/ibm-messaging/mq-golang/v5/ibmmq"
 	"github.com/sirupsen/logrus"
 )
 
@@ -32,6 +33,11 @@ const (
 	MQCFT_GROUP              = 20
 	MQCFT_STATISTICS         = 21
 	MQCFT_ACCOUNTING         = 22
+	MQCFT_INTEGER64          = 23
+	MQCFT_INTEGER64_LIST     = 25
+	MQCFT_APP_ACTIVITY       = 26
+	// Type 68 seen in IBM MQ Windows statistics - possibly embedded or nested structure
+	MQCFT_EMBEDDED_PCF = 68
 )
 
 // Common IBM MQ Constants
@@ -40,10 +46,12 @@ const (
 	MQCMD_STATISTICS_MQI     = 112 // 0x70
 	MQCMD_STATISTICS_Q       = 113 // 0x71
 	MQCMD_STATISTICS_CHANNEL = 114 // 0x72
+	MQCMD_Q_MGR_STATUS       = 164 // 0xA4 - Queue Manager Status (contains MQI stats)
 
 	// Accounting Types (MQCMD_*)
-	MQCMD_ACCOUNTING_MQI = 138 // 0x8A
-	MQCMD_ACCOUNTING_Q   = 139 // 0x8B
+	MQCMD_ACCOUNTING_MQI     = 138 // 0x8A
+	MQCMD_ACCOUNTING_Q       = 139 // 0x8B
+	MQCMD_ACCOUNTING_CHANNEL = 167 // 0xA7
 
 	// Common Parameters (MQCA_*, MQIA_*)
 	MQCA_Q_NAME            = 2016 // Queue name
@@ -66,13 +74,21 @@ const (
 	MQIACH_BYTES   = 1502 // Channel bytes
 	MQIACH_BATCHES = 1503 // Channel batches
 
-	// MQI Statistics (MQIAMO_*)
-	MQIAMO_OPENS    = 3  // MQI opens
-	MQIAMO_CLOSES   = 4  // MQI closes
-	MQIAMO_PUTS     = 17 // MQI puts
-	MQIAMO_GETS     = 18 // MQI gets
-	MQIAMO_COMMITS  = 12 // MQI commits
-	MQIAMO_BACKOUTS = 13 // MQI backouts
+	// MQI Statistics (MQIAMO_*) - Windows values from cmqc_windows.go
+	// Note: These values differ from Linux! On Linux: OPENS=3, CLOSES=4, etc.
+	// On Windows, they are in the 700+ range.
+	MQIAMO_OPENS    = 733 // MQI opens
+	MQIAMO_CLOSES   = 709 // MQI closes
+	MQIAMO_PUTS     = 735 // MQI puts
+	MQIAMO_GETS     = 722 // MQI gets
+	MQIAMO_COMMITS  = 710 // MQI commits
+	MQIAMO_BACKOUTS = 704 // MQI backouts
+
+	// Application and Connection Parameters (MQCACF_*, MQCACH_*)
+	MQCACF_APPL_NAME       = 3024 // Application name
+	MQCACF_APPL_TAG        = 3058 // Application tag
+	MQCACF_USER_IDENTIFIER = 3025 // User identifier
+	MQCACH_CONNECTION_NAME = 3506 // Client connection name/IP
 
 	// Time and Control Parameters (MQCACF_*, MQIACF_*)
 	MQCACF_COMMAND_TIME    = 3603 // Command time
@@ -94,10 +110,11 @@ type PCFHeader struct {
 
 // PCFParameter represents a PCF parameter
 type PCFParameter struct {
-	Parameter int32
-	Type      int32
-	Length    int32
-	Value     interface{}
+	Parameter    int32
+	Type         int32
+	StrucLength  int32 // Total structure length including padding
+	Value        interface{}
+	StringLength int32 // Only used for string types
 }
 
 // StatisticsData represents parsed statistics data
@@ -136,6 +153,10 @@ type ChannelStatistics struct {
 // MQIStatistics represents MQI-specific statistics
 type MQIStatistics struct {
 	ApplicationName string `json:"application_name"`
+	ApplicationTag  string `json:"application_tag"`
+	ConnectionName  string `json:"connection_name"`
+	UserIdentifier  string `json:"user_identifier"`
+	ChannelName     string `json:"channel_name"`
 	Opens           int32  `json:"opens"`
 	Closes          int32  `json:"closes"`
 	Puts            int32  `json:"puts"`
@@ -159,6 +180,8 @@ type ConnectionInfo struct {
 	ChannelName     string    `json:"channel_name"`
 	ConnectionName  string    `json:"connection_name"`
 	ApplicationName string    `json:"application_name"`
+	ApplicationTag  string    `json:"application_tag"`
+	UserIdentifier  string    `json:"user_identifier"`
 	ConnectTime     time.Time `json:"connect_time"`
 	DisconnectTime  time.Time `json:"disconnect_time"`
 }
@@ -211,9 +234,13 @@ func (p *Parser) ParseMessage(data []byte, msgType string) (interface{}, error) 
 
 	// Determine if this is statistics or accounting data based on command
 	switch {
-	case header.Command == MQCMD_STATISTICS_Q || header.Command == MQCMD_STATISTICS_CHANNEL || header.Command == MQCMD_STATISTICS_MQI:
+	case header.Command == MQCMD_STATISTICS_Q:
 		return p.parseStatistics(header, parameters)
-	case header.Command == MQCMD_ACCOUNTING_Q || header.Command == MQCMD_ACCOUNTING_MQI:
+	case header.Command == MQCMD_STATISTICS_CHANNEL:
+		return p.parseStatistics(header, parameters)
+	case header.Command == MQCMD_STATISTICS_MQI || header.Command == MQCMD_Q_MGR_STATUS:
+		return p.parseStatistics(header, parameters)
+	case header.Command == MQCMD_ACCOUNTING_Q || header.Command == MQCMD_ACCOUNTING_MQI || header.Command == MQCMD_ACCOUNTING_CHANNEL:
 		return p.parseAccounting(header, parameters)
 	default:
 		// Generic parsing for other message types
@@ -246,78 +273,92 @@ func (p *Parser) parseHeader(data []byte) (*PCFHeader, error) {
 	return header, nil
 }
 
-// parseParameters parses PCF parameters
+// parseParameters parses PCF parameters using IBM's official library
 func (p *Parser) parseParameters(data []byte, count int32) ([]*PCFParameter, error) {
 	var parameters []*PCFParameter
 	offset := 0
 
 	for offset < len(data) {
-		if offset+12 > len(data) {
-			p.logger.WithField("remaining_bytes", len(data)-offset).Debug("Not enough bytes for PCF parameter header")
+		// Use IBM's ReadPCFParameter to parse each parameter
+		ibmParam, bytesRead := ibmmq.ReadPCFParameter(data[offset:])
+		if ibmParam == nil || bytesRead == 0 {
+			p.logger.WithField("remaining_bytes", len(data)-offset).Debug("Failed to read PCF parameter")
 			break
 		}
 
-		param := &PCFParameter{
-			Parameter: int32(binary.LittleEndian.Uint32(data[offset : offset+4])),
-			Type:      int32(binary.LittleEndian.Uint32(data[offset+4 : offset+8])),
-			Length:    int32(binary.LittleEndian.Uint32(data[offset+8 : offset+12])),
+		// Convert IBM's PCFParameter to our PCFParameter format
+		param := p.convertIBMParameter(ibmParam)
+		if param != nil {
+			parameters = append(parameters, param)
 		}
 
-		// Validate parameter length
-		if param.Length < 12 || param.Length > 65536 {
-			p.logger.WithFields(logrus.Fields{
-				"parameter": param.Parameter,
-				"type":      param.Type,
-				"length":    param.Length,
-				"offset":    offset,
-			}).Warn("Invalid parameter length, skipping to next message")
-			break
-		}
-
-		if offset+int(param.Length) > len(data) {
-			p.logger.WithFields(logrus.Fields{
-				"parameter":    param.Parameter,
-				"length":       param.Length,
-				"offset":       offset,
-				"data_length":  len(data),
-				"required_end": offset + int(param.Length),
-			}).Warn("Parameter extends beyond data length")
-			break
-		}
-
-		// Parse parameter value based on type
-		switch param.Type {
-		case MQCFT_INTEGER:
-			if param.Length >= 16 {
-				param.Value = int32(binary.LittleEndian.Uint32(data[offset+12 : offset+16]))
-			}
-		case MQCFT_STRING:
-			if param.Length > 12 {
-				strLen := param.Length - 12
-				str := string(data[offset+12 : offset+12+int(strLen)])
-				// Remove null terminators and trim spaces
-				param.Value = p.cleanString(str)
-			}
-		case MQCFT_BYTE_STRING:
-			if param.Length > 12 {
-				dataLen := param.Length - 12
-				param.Value = data[offset+12 : offset+12+int(dataLen)]
-			}
-		default:
-			// Unknown parameter type, skip
-			param.Value = nil
-		}
-
-		parameters = append(parameters, param)
-		offset += int(param.Length)
-
-		// Ensure 4-byte alignment
-		if offset%4 != 0 {
-			offset += 4 - (offset % 4)
-		}
+		offset += bytesRead
 	}
 
 	return parameters, nil
+}
+
+// convertIBMParameter converts IBM MQ library's PCFParameter to our format
+func (p *Parser) convertIBMParameter(ibmParam *ibmmq.PCFParameter) *PCFParameter {
+	if ibmParam == nil {
+		return nil
+	}
+
+	param := &PCFParameter{
+		Parameter: ibmParam.Parameter,
+		Type:      ibmParam.Type,
+	}
+
+	// Convert value based on type
+	switch ibmParam.Type {
+	case MQCFT_INTEGER, MQCFT_INTEGER64:
+		if len(ibmParam.Int64Value) > 0 {
+			// For single integers, store as int32
+			param.Value = int32(ibmParam.Int64Value[0])
+		}
+	case MQCFT_INTEGER_LIST, MQCFT_INTEGER64_LIST:
+		// For integer lists, keep as []int64 but we'll need to handle this
+		if len(ibmParam.Int64Value) > 0 {
+			param.Value = ibmParam.Int64Value
+		}
+	case MQCFT_STRING:
+		if len(ibmParam.String) > 0 {
+			param.Value = p.cleanString(ibmParam.String[0])
+		}
+	case MQCFT_STRING_LIST:
+		if len(ibmParam.String) > 0 {
+			param.Value = ibmParam.String
+		}
+	case MQCFT_GROUP:
+		// Recursively convert group parameters
+		if len(ibmParam.GroupList) > 0 {
+			nestedParams := make([]*PCFParameter, 0, len(ibmParam.GroupList))
+			for _, ibmNested := range ibmParam.GroupList {
+				if converted := p.convertIBMParameter(ibmNested); converted != nil {
+					nestedParams = append(nestedParams, converted)
+				}
+			}
+			if len(nestedParams) > 0 {
+				param.Value = nestedParams
+				p.logger.WithFields(logrus.Fields{
+					"parameter":    param.Parameter,
+					"nested_count": len(nestedParams),
+				}).Debug("Converted GROUP parameter with nested params")
+			}
+		}
+	case MQCFT_BYTE_STRING:
+		if len(ibmParam.String) > 0 {
+			// IBM library converts byte strings to hex strings
+			param.Value = ibmParam.String[0]
+		}
+	default:
+		p.logger.WithFields(logrus.Fields{
+			"parameter": ibmParam.Parameter,
+			"type":      ibmParam.Type,
+		}).Debug("Unknown IBM parameter type")
+	}
+
+	return param
 }
 
 // parseStatistics converts parameters to statistics data structure
@@ -351,7 +392,7 @@ func (p *Parser) parseStatistics(header *PCFHeader, parameters []*PCFParameter) 
 		stats.QueueStats = p.parseQueueStats(parameters)
 	case MQCMD_STATISTICS_CHANNEL:
 		stats.ChannelStats = p.parseChannelStats(parameters)
-	case MQCMD_STATISTICS_MQI:
+	case MQCMD_STATISTICS_MQI, MQCMD_Q_MGR_STATUS:
 		stats.MQIStats = p.parseMQIStats(parameters)
 	}
 
@@ -453,26 +494,132 @@ func (p *Parser) parseChannelStats(parameters []*PCFParameter) *ChannelStatistic
 func (p *Parser) parseMQIStats(parameters []*PCFParameter) *MQIStatistics {
 	stats := &MQIStatistics{}
 
+	// Log all parameters to help debug
+	p.logger.WithField("parameter_count", len(parameters)).Debug("parseMQIStats called with parameters")
+
 	for _, param := range parameters {
+		p.logger.WithFields(logrus.Fields{
+			"parameter_id": param.Parameter,
+			"type":         param.Type,
+			"value_type":   fmt.Sprintf("%T", param.Value),
+		}).Debug("Processing parameter in MQI stats")
+
+		// Check for nested parameters (from embedded PCF structures)
+		if nestedParams, ok := param.Value.([]*PCFParameter); ok {
+			p.logger.WithFields(logrus.Fields{
+				"parameter_id": param.Parameter,
+				"nested_count": len(nestedParams),
+			}).Debug("Processing nested parameters in MQI stats")
+
+			// Log first few nested param IDs to see what we have
+			if len(nestedParams) > 0 {
+				sampleIDs := []int32{}
+				for i, np := range nestedParams {
+					if i < 10 {
+						sampleIDs = append(sampleIDs, np.Parameter)
+					}
+				}
+				p.logger.WithField("sample_param_ids", sampleIDs).Debug("Sample nested parameter IDs")
+			}
+
+			// Recursively parse nested parameters
+			nestedStats := p.parseMQIStats(nestedParams)
+			if nestedStats != nil {
+				// Merge nested stats into current stats
+				if nestedStats.Opens > 0 {
+					stats.Opens += nestedStats.Opens
+				}
+				if nestedStats.Closes > 0 {
+					stats.Closes += nestedStats.Closes
+				}
+				if nestedStats.Puts > 0 {
+					stats.Puts += nestedStats.Puts
+				}
+				if nestedStats.Gets > 0 {
+					stats.Gets += nestedStats.Gets
+				}
+				if nestedStats.Commits > 0 {
+					stats.Commits += nestedStats.Commits
+				}
+				if nestedStats.Backouts > 0 {
+					stats.Backouts += nestedStats.Backouts
+				}
+				if nestedStats.ApplicationName != "" {
+					stats.ApplicationName = nestedStats.ApplicationName
+				}
+			}
+			continue
+		}
+
+		// Check for integer list values (MQCFT_INTEGER_LIST or MQCFT_INTEGER64_LIST)
+		if valList, ok := param.Value.([]int64); ok {
+			// Sum all values in the list
+			var sum int32
+			for _, v := range valList {
+				sum += int32(v)
+			}
+
+			switch param.Parameter {
+			case MQIAMO_OPENS:
+				stats.Opens = sum
+				p.logger.WithField("opens", sum).Debug("Found Opens (from list)")
+			case MQIAMO_CLOSES:
+				stats.Closes = sum
+				p.logger.WithField("closes", sum).Debug("Found Closes (from list)")
+			case MQIAMO_PUTS:
+				stats.Puts = sum
+				p.logger.WithField("puts", sum).Debug("Found Puts (from list)")
+			case MQIAMO_GETS:
+				stats.Gets = sum
+				p.logger.WithField("gets", sum).Debug("Found Gets (from list)")
+			case MQIAMO_COMMITS:
+				stats.Commits = sum
+				p.logger.WithField("commits", sum).Debug("Found Commits (from list)")
+			case MQIAMO_BACKOUTS:
+				stats.Backouts = sum
+				p.logger.WithField("backouts", sum).Debug("Found Backouts (from list)")
+			}
+			continue
+		}
+
 		if val, ok := param.Value.(int32); ok {
 			switch param.Parameter {
 			case MQIAMO_OPENS:
 				stats.Opens = val
+				p.logger.WithField("opens", val).Info("Found Opens")
 			case MQIAMO_CLOSES:
 				stats.Closes = val
+				p.logger.WithField("closes", val).Info("Found Closes")
 			case MQIAMO_PUTS:
 				stats.Puts = val
+				p.logger.WithField("puts", val).Info("Found Puts")
 			case MQIAMO_GETS:
 				stats.Gets = val
+				p.logger.WithField("gets", val).Info("Found Gets")
 			case MQIAMO_COMMITS:
 				stats.Commits = val
+				p.logger.WithField("commits", val).Info("Found Commits")
 			case MQIAMO_BACKOUTS:
 				stats.Backouts = val
+				p.logger.WithField("backouts", val).Info("Found Backouts")
 			}
 		} else if str, ok := param.Value.(string); ok {
 			switch param.Parameter {
-			case MQCA_APPL_NAME:
+			case MQCA_APPL_NAME, MQCACF_APPL_NAME:
 				stats.ApplicationName = str
+				p.logger.WithField("app_name", str).Debug("Found ApplicationName")
+			case MQCACF_APPL_TAG:
+				stats.ApplicationTag = str
+				p.logger.WithField("app_tag", str).Debug("Found ApplicationTag")
+			case MQCACF_USER_IDENTIFIER:
+				stats.UserIdentifier = str
+				p.logger.WithField("user", str).Debug("Found UserIdentifier")
+			case MQCACH_CONNECTION_NAME:
+				stats.ConnectionName = str
+				p.logger.WithField("connection", str).Debug("Found ConnectionName")
+			case MQCA_CHANNEL_NAME:
+				stats.ChannelName = str
+				p.logger.WithField("channel", str).Debug("Found ChannelName")
 			}
 		}
 	}
@@ -489,10 +636,14 @@ func (p *Parser) parseConnectionInfo(parameters []*PCFParameter) *ConnectionInfo
 			switch param.Parameter {
 			case MQCA_CHANNEL_NAME:
 				info.ChannelName = str
-			case MQCA_CONNECTION_NAME:
+			case MQCA_CONNECTION_NAME, MQCACH_CONNECTION_NAME:
 				info.ConnectionName = str
-			case MQCA_APPL_NAME:
+			case MQCA_APPL_NAME, MQCACF_APPL_NAME:
 				info.ApplicationName = str
+			case MQCACF_APPL_TAG:
+				info.ApplicationTag = str
+			case MQCACF_USER_IDENTIFIER:
+				info.UserIdentifier = str
 			}
 		}
 	}

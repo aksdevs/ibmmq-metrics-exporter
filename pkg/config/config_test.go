@@ -23,7 +23,7 @@ func TestDefaultConfig(t *testing.T) {
 	assert.Equal(t, "", cfg.Collector.StatsQueue)
 	assert.Equal(t, "", cfg.Collector.AccountingQueue)
 	assert.Equal(t, 60*time.Second, cfg.Collector.Interval) // This has a default
-	assert.Equal(t, 9090, cfg.Prometheus.Port)              // This has a default
+	assert.Equal(t, 9091, cfg.Prometheus.Port)              // This has a default
 	assert.Equal(t, "/metrics", cfg.Prometheus.Path)        // This has a default
 	assert.Equal(t, "ibmmq", cfg.Prometheus.Namespace)      // This has a default
 }
@@ -41,8 +41,9 @@ func TestLoadDefaultYAMLConfig(t *testing.T) {
 	assert.Equal(t, 5200, cfg.MQ.Port)
 	assert.Equal(t, "SYSTEM.ADMIN.STATISTICS.QUEUE", cfg.Collector.StatsQueue)
 	assert.Equal(t, "SYSTEM.ADMIN.ACCOUNTING.QUEUE", cfg.Collector.AccountingQueue)
-	assert.Equal(t, 60*time.Second, cfg.Collector.Interval)
-	assert.Equal(t, 9090, cfg.Prometheus.Port)
+	assert.Equal(t, 10*time.Second, cfg.Collector.Interval)
+	assert.True(t, cfg.Collector.Continuous)
+	assert.Equal(t, 9091, cfg.Prometheus.Port)
 	assert.Equal(t, "/metrics", cfg.Prometheus.Path)
 	assert.Equal(t, "ibmmq", cfg.Prometheus.Namespace)
 }
@@ -323,7 +324,7 @@ collector:
 			check: func(t *testing.T, cfg *Config) {
 				assert.Empty(t, cfg.MQ.QueueManager)                    // No default - should be empty
 				assert.Equal(t, 60*time.Second, cfg.Collector.Interval) // Should get YAML value
-				assert.Equal(t, 9090, cfg.Prometheus.Port)              // Should get default
+				assert.Equal(t, 9091, cfg.Prometheus.Port)              // Should get default
 			},
 		},
 	}
@@ -443,7 +444,7 @@ func TestConfigurationDefaults(t *testing.T) {
 	assert.False(t, cfg.Collector.ResetStats)
 
 	// Prometheus defaults
-	assert.Equal(t, 9090, cfg.Prometheus.Port)
+	assert.Equal(t, 9091, cfg.Prometheus.Port)
 	assert.Equal(t, "/metrics", cfg.Prometheus.Path)
 	assert.Equal(t, "ibmmq", cfg.Prometheus.Namespace)
 	assert.True(t, cfg.Prometheus.EnableOTel)
