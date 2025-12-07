@@ -188,6 +188,7 @@ type QueueStatistics struct {
 // ProcInfo represents a process (input/output) associated with a queue
 type ProcInfo struct {
 	ApplicationName string `json:"application_name"`
+	ProcessID       int32  `json:"process_id"` // Operating system process ID
 	ConnectionName  string `json:"connection_name"`
 	UserIdentifier  string `json:"user_identifier"`
 	ChannelName     string `json:"channel_name"`
