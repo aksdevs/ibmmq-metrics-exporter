@@ -132,6 +132,7 @@ const (
 	MQCACF_APPL_TAG        = 3058 // Application tag
 	MQCACF_USER_IDENTIFIER = 3025 // User identifier
 	MQCACH_CONNECTION_NAME = 3506 // Client connection name/IP
+	MQIACF_PROCESS_ID      = 1047 // Process ID
 
 	// Time and Control Parameters (MQCACF_*, MQIACF_*)
 	MQCACF_COMMAND_TIME    = 3603 // Command time
@@ -188,6 +189,7 @@ type QueueStatistics struct {
 // ProcInfo represents a process (input/output) associated with a queue
 type ProcInfo struct {
 	ApplicationName string `json:"application_name"`
+	ProcessID       int32  `json:"process_id"` // Operating system process ID
 	ConnectionName  string `json:"connection_name"`
 	UserIdentifier  string `json:"user_identifier"`
 	ChannelName     string `json:"channel_name"`
@@ -683,6 +685,9 @@ func (p *Parser) parseQueueStats(parameters []*PCFParameter) *QueueStatistics {
 							proc.Role = "output"
 							p.logger.WithField("output_count", ival).Info("parseQueueStats: detected output role")
 						}
+					case MQIACF_PROCESS_ID:
+						proc.ProcessID = ival
+						p.logger.WithField("process_id", ival).Info("parseQueueStats: extracted PROCESS_ID")
 					}
 				}
 			}

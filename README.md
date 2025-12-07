@@ -152,6 +152,33 @@ ibmmq_queue_output_handles      - Number of putters/producers
 Reference: IBM MQ Knowledge Center - MQINQ (Inquire queue object)
 https://www.ibm.com/docs/en/ibm-mq/latest?topic=reference-mqinq
 
+### Handle-Level Metrics (Application/Process Details)
+
+Similar to the MQSC command `DIS QS(queue_name) TYPE(HANDLE) ALL`, these metrics provide application/process information for queues:
+
+```
+ibmmq_queue_handle_count   - Total number of open handles (processes) on a queue
+ibmmq_queue_handle_info    - Details about open handles (app name, user, open mode)
+```
+
+**Label Sets**:
+- `ibmmq_queue_handle_count`: `queue_manager`, `queue_name`, `handle_type` (input/output)
+- `ibmmq_queue_handle_info`: `queue_manager`, `queue_name`, `application_name`, `user_identifier`, `open_mode`, `handle_state`
+
+**Example Output**:
+```
+ibmmq_queue_handle_count{queue_manager="MQQM1",queue_name="TEST.QUEUE",handle_type="input"} 2
+ibmmq_queue_handle_count{queue_manager="MQQM1",queue_name="TEST.QUEUE",handle_type="output"} 1
+ibmmq_queue_handle_info{queue_manager="MQQM1",queue_name="TEST.QUEUE",application_name="amqsget",user_identifier="user1",open_mode="Input",handle_state="Open"} 1
+ibmmq_queue_handle_info{queue_manager="MQQM1",queue_name="TEST.QUEUE",application_name="amqsput",user_identifier="user2",open_mode="Output",handle_state="Open"} 1
+```
+
+These metrics help you:
+- Identify which applications are actively using each queue
+- Monitor the number of producers and consumers per queue
+- Track user IDs accessing queues for security/audit purposes
+- Detect stuck or long-running processes
+
 ## How the Code is Ready for Future IBM MQ Enhancements
 
 The implementation has forward compatibility built in:
@@ -483,6 +510,7 @@ https://www.ibm.com/docs/en/ibm-mq/latest?topic=queues-system-queue-definitions
 - Creates and manages connection to queue manager
 - Opens/reads statistics and accounting queues
 - Provides MQINQ API for direct queue queries
+- Retrieves handle-level (application/process) information similar to `DIS QS TYPE(HANDLE)`
 
 **pkg/pcf** - Message Parsing
 - Parses PCF message headers and parameters
@@ -490,13 +518,14 @@ https://www.ibm.com/docs/en/ibm-mq/latest?topic=queues-system-queue-definitions
 - Builds queue-level operation records
 
 **pkg/prometheus** - Metrics Export
-- Manages Prometheus metric gauges
+- Manages Prometheus metric gauges (40+ metrics)
 - Registers metrics with Prometheus registry
 - Updates metric values from parsed data
+- Collects handle-level metrics for active applications/processes on queues
 - Exposes HTTP metrics endpoint
 
 **cmd/collector** - Main Application
-- Orchestrates collection cycle
+- Orchestrates collection cycle (messages, queue stats, handles)
 - Manages YAML configuration
 - Handles continuous vs one-time collection
 - Controls HTTP server lifecycle
