@@ -490,6 +490,7 @@ func TestPCFParser_ParseQueueStats_WithAssociatedProcesses(t *testing.T) {
 		{Parameter: MQCA_CHANNEL_NAME, Type: MQCFT_STRING, Value: "APP1.SVRCONN"},
 		{Parameter: MQIA_OPEN_INPUT_COUNT, Type: MQCFT_INTEGER, Value: int32(1)},
 		{Parameter: MQIA_OPEN_OUTPUT_COUNT, Type: MQCFT_INTEGER, Value: int32(0)},
+		{Parameter: MQIACF_PROCESS_ID, Type: MQCFT_INTEGER, Value: int32(1234)},
 	}
 
 	procGroup2 := []*PCFParameter{
@@ -499,6 +500,7 @@ func TestPCFParser_ParseQueueStats_WithAssociatedProcesses(t *testing.T) {
 		{Parameter: MQCA_CHANNEL_NAME, Type: MQCFT_STRING, Value: "APP2.SVRCONN"},
 		{Parameter: MQIA_OPEN_INPUT_COUNT, Type: MQCFT_INTEGER, Value: int32(0)},
 		{Parameter: MQIA_OPEN_OUTPUT_COUNT, Type: MQCFT_INTEGER, Value: int32(1)},
+		{Parameter: MQIACF_PROCESS_ID, Type: MQCFT_INTEGER, Value: int32(5678)},
 	}
 
 	parameters := []*PCFParameter{
@@ -518,11 +520,13 @@ func TestPCFParser_ParseQueueStats_WithAssociatedProcesses(t *testing.T) {
 	assert.Equal(t, "InputApp", stats.AssociatedProcs[0].ApplicationName)
 	assert.Equal(t, "192.168.1.100", stats.AssociatedProcs[0].ConnectionName)
 	assert.Equal(t, "input", stats.AssociatedProcs[0].Role)
+	assert.Equal(t, int32(1234), stats.AssociatedProcs[0].ProcessID)
 
 	// Check second process
 	assert.Equal(t, "OutputApp", stats.AssociatedProcs[1].ApplicationName)
 	assert.Equal(t, "192.168.1.101", stats.AssociatedProcs[1].ConnectionName)
 	assert.Equal(t, "output", stats.AssociatedProcs[1].Role)
+	assert.Equal(t, int32(5678), stats.AssociatedProcs[1].ProcessID)
 }
 
 // Helper functions to create test data

@@ -132,6 +132,7 @@ const (
 	MQCACF_APPL_TAG        = 3058 // Application tag
 	MQCACF_USER_IDENTIFIER = 3025 // User identifier
 	MQCACH_CONNECTION_NAME = 3506 // Client connection name/IP
+	MQIACF_PROCESS_ID      = 1047 // Process ID
 
 	// Time and Control Parameters (MQCACF_*, MQIACF_*)
 	MQCACF_COMMAND_TIME    = 3603 // Command time
@@ -684,6 +685,9 @@ func (p *Parser) parseQueueStats(parameters []*PCFParameter) *QueueStatistics {
 							proc.Role = "output"
 							p.logger.WithField("output_count", ival).Info("parseQueueStats: detected output role")
 						}
+					case MQIACF_PROCESS_ID:
+						proc.ProcessID = ival
+						p.logger.WithField("process_id", ival).Info("parseQueueStats: extracted PROCESS_ID")
 					}
 				}
 			}
