@@ -34,77 +34,100 @@ type QueueHandleDetails struct {
 // BuildInquireQueueStatusCmd builds a PCF INQUIRE_QUEUE_STATUS command
 // This queries queue handle details similar to: DIS QS(queue_name) TYPE(HANDLE) ALL
 func (h *InquiryHandler) BuildInquireQueueStatusCmd(queueName string) []byte {
-	// PCF Command Format:
-	// Offset  Size  Description
-	// 0-3     4     Magic "PCF\0" (0x50434600)
-	// 4-7     4     Message Type (1 = MQCFT_COMMAND)
-	// 8-11    4     Command Code (96 = MQCMD_INQUIRE_QUEUE_STATUS)
-	// 12-15   4     Reserved
-	// 16-19   4     Parameter Count
+	// PCF Command Format (IBM MQ MQCMD_INQUIRE_Q_STATUS = 34)
+	// Parameters needed:
+	// 1. MQCA_Q_NAME (2016) - Queue name
+	// 2. MQIACF_Q_STATUS_TYPE (1238) with value MQIACF_Q_STATUS_HANDLE (2)
 
-	buf := make([]byte, 0, 256)
+	buf := make([]byte, 0, 512)
 
-	// Magic
-	buf = append(buf, 0x50, 0x43, 0x46, 0x00) // "PCF\0"
+	// PCF Header (20 bytes)
+	// Offset 0-3: Type (MQCFT_COMMAND = 1)
+	buf = appendInt32BE(buf, 1)
 
-	// Message type
-	buf = append(buf, 0x00, 0x00, 0x00, 0x01) // MQCFT_COMMAND
+	// Offset 4-7: StrucLength (will be updated at end)
+	strucLengthPos := len(buf)
+	buf = appendInt32BE(buf, 0)
 
-	// Command code
-	buf = append(buf, 0x00, 0x00, 0x00, 0x60) // 96 = MQCMD_INQUIRE_QUEUE_STATUS
+	// Offset 8-11: Version (MQCFH_VERSION_3 = 3)
+	buf = appendInt32BE(buf, 3)
 
-	// Reserved
-	buf = append(buf, 0x00, 0x00, 0x00, 0x00)
+	// Offset 12-15: Command (MQCMD_INQUIRE_Q_STATUS = 34)
+	buf = appendInt32BE(buf, 34)
 
-	// Parameter count (will be updated)
-	paramCountPos := len(buf)
-	buf = append(buf, 0x00, 0x00, 0x00, 0x01) // 1 parameter
+	// Offset 16-19: MsgSeqNumber
+	buf = appendInt32BE(buf, 1)
+
+	// Offset 20-23: Control (MQCFC_LAST = 1)
+	buf = appendInt32BE(buf, 1)
+
+	// Offset 24-27: CompCode
+	buf = appendInt32BE(buf, 0)
+
+	// Offset 28-31: Reason
+	buf = appendInt32BE(buf, 0)
+
+	// Offset 32-35: ParameterCount
+	buf = appendInt32BE(buf, 2) // Will have 2 parameters
 
 	// Parameter 1: Queue Name (MQCA_Q_NAME = 2016)
-	// Parameter format:
-	// Offset  Size  Description
-	// 0-3     4     Type (4 = MQCFT_STRING)
-	// 4-7     4     Parameter length (including header)
-	// 8-11    4     Parameter ID
-	// 12-15   4     String length
-	// 16+     var   String data (padded to 4-byte boundary)
-
+	// MQCFST structure for string parameter
 	paramStart := len(buf)
 
-	// Type
-	buf = append(buf, 0x00, 0x00, 0x00, 0x04) // MQCFT_STRING
+	// Type (MQCFT_STRING = 4)
+	buf = appendInt32BE(buf, 4)
 
-	// Length placeholder
-	lenPos := len(buf)
-	buf = append(buf, 0x00, 0x00, 0x00, 0x00)
+	// StrucLength (will be calculated)
+	paramLenPos := len(buf)
+	buf = appendInt32BE(buf, 0)
 
-	// Parameter ID
-	buf = append(buf, 0x00, 0x00, 0x07, 0xE0) // 2016 = MQCA_Q_NAME
+	// Parameter (MQCA_Q_NAME = 2016)
+	buf = appendInt32BE(buf, 2016)
 
-	// String length
-	buf = append(buf, byte((len(queueName)>>24)&0xFF), byte((len(queueName)>>16)&0xFF),
-		byte((len(queueName)>>8)&0xFF), byte(len(queueName)&0xFF))
+	// CodedCharSetId (system default = 0)
+	buf = appendInt32BE(buf, 0)
 
-	// String data
+	// StringLength
+	qnameLen := len(queueName)
+	buf = appendInt32BE(buf, int32(qnameLen))
+
+	// String data (padded to 4-byte boundary)
 	buf = append(buf, []byte(queueName)...)
-
-	// Padding to 4-byte boundary
-	padding := (4 - (len(queueName) % 4)) % 4
+	padding := (4 - (qnameLen % 4)) % 4
 	for i := 0; i < padding; i++ {
 		buf = append(buf, 0x00)
 	}
 
 	// Update parameter length
 	paramLen := len(buf) - paramStart
-	binary.BigEndian.PutUint32(buf[lenPos:], uint32(paramLen))
+	binary.BigEndian.PutUint32(buf[paramLenPos:], uint32(paramLen))
 
-	// Update parameter count if needed
-	binary.BigEndian.PutUint32(buf[paramCountPos:], 1)
+	// Parameter 2: Status Type (MQIACF_Q_STATUS_TYPE = 1238)
+	// MQCFIN structure for integer parameter
+	paramStart = len(buf)
+
+	// Type (MQCFT_INTEGER = 3)
+	buf = appendInt32BE(buf, 3)
+
+	// StrucLength (16 bytes for integer parameter)
+	buf = appendInt32BE(buf, 16)
+
+	// Parameter (MQIACF_Q_STATUS_TYPE = 1238)
+	buf = appendInt32BE(buf, 1238)
+
+	// Value (MQIACF_Q_STATUS_HANDLE = 2)
+	buf = appendInt32BE(buf, 2)
+
+	// Update structure length in header
+	totalLen := len(buf)
+	binary.BigEndian.PutUint32(buf[strucLengthPos:], uint32(totalLen))
 
 	h.logger.WithFields(map[string]interface{}{
-		"queue_name": queueName,
-		"msg_size":   len(buf),
-	}).Debug("Built INQUIRE_QUEUE_STATUS PCF command")
+		"queue_name":  queueName,
+		"msg_size":    len(buf),
+		"command":     34, // MQCMD_INQUIRE_Q_STATUS
+		"status_type": 2,  // MQIACF_Q_STATUS_HANDLE
+	}).Debug("Built INQUIRE_Q_STATUS PCF command for handle inquiry")
 
 	return buf
 }
@@ -114,53 +137,83 @@ func (h *InquiryHandler) BuildInquireQueueStatusCmd(queueName string) []byte {
 func (h *InquiryHandler) ParseQueueStatusResponse(data []byte) []*QueueHandleDetails {
 	handles := make([]*QueueHandleDetails, 0)
 
-	if len(data) < 20 {
+	if len(data) < 36 {
+		h.logger.WithField("data_len", len(data)).Debug("Response too short for PCF header")
 		return handles
 	}
 
-	// Validate PCF header
-	if string(data[0:3]) != "PCF" {
-		h.logger.WithField("magic", string(data[0:3])).Debug("Invalid PCF magic")
+	// Parse PCF Header (MQCFH)
+	// Offset 0-3: Type
+	msgType := binary.BigEndian.Uint32(data[0:4])
+
+	// Offset 4-7: StrucLength
+	strucLen := binary.BigEndian.Uint32(data[4:8])
+
+	// Offset 8-11: Version
+	version := binary.BigEndian.Uint32(data[8:12])
+
+	// Offset 12-15: Command
+	command := binary.BigEndian.Uint32(data[12:16])
+
+	// Offset 28-31: CompCode
+	compCode := binary.BigEndian.Uint32(data[28:32])
+
+	// Offset 32-35: Reason
+	reason := binary.BigEndian.Uint32(data[32:36])
+
+	// Offset 36-39: ParameterCount
+	if len(data) < 40 {
+		return handles
+	}
+	paramCount := binary.BigEndian.Uint32(data[36:40])
+
+	h.logger.WithFields(map[string]interface{}{
+		"msg_type":    msgType,
+		"struc_len":   strucLen,
+		"version":     version,
+		"command":     command,
+		"comp_code":   compCode,
+		"reason":      reason,
+		"param_count": paramCount,
+	}).Debug("Parsed PCF response header")
+
+	// Check for errors
+	if compCode != 0 {
+		h.logger.WithFields(map[string]interface{}{
+			"comp_code": compCode,
+			"reason":    reason,
+		}).Warn("PCF command returned error")
 		return handles
 	}
 
-	msgType := binary.BigEndian.Uint32(data[4:8])
-	if msgType != 2 { // MQCFT_RESPONSE
-		h.logger.WithField("msg_type", msgType).Debug("Not a PCF response")
-		return handles
-	}
-
-	paramCount := binary.BigEndian.Uint32(data[16:20])
-	h.logger.WithField("param_count", paramCount).Debug("Parsing PCF response parameters")
-
-	// Parse parameters
-	offset := 20
+	// Parse parameters starting at offset 40
+	offset := 40
 	currentHandle := &QueueHandleDetails{}
-	handleCount := 0
+	inGroup := false
 
-	for offset < len(data) {
+	for offset < len(data) && offset < int(strucLen) {
 		if offset+8 > len(data) {
 			break
 		}
 
 		paramType := binary.BigEndian.Uint32(data[offset : offset+4])
-		paramLen := binary.BigEndian.Uint32(data[offset+4 : offset+8])
+		paramStrucLen := binary.BigEndian.Uint32(data[offset+4 : offset+8])
 
-		if offset+8+int(paramLen) > len(data) {
+		if paramStrucLen == 0 || offset+int(paramStrucLen) > len(data) {
 			break
 		}
 
-		paramData := data[offset+8 : offset+8+int(paramLen)]
-		offset += 8 + int(paramLen)
+		paramData := data[offset+8 : offset+int(paramStrucLen)]
 
 		// Handle parameter based on type
 		switch paramType {
 		case 20: // MQCFT_GROUP - Start of a new handle group
-			if handleCount > 0 && currentHandle.QueueName != "" {
+			if inGroup && currentHandle.QueueName != "" {
 				handles = append(handles, currentHandle)
 			}
 			currentHandle = &QueueHandleDetails{}
-			handleCount++
+			inGroup = true
+			h.logger.Debug("Started new handle group")
 
 		case 4: // MQCFT_STRING
 			h.parseStringParameter(paramData, currentHandle)
@@ -168,57 +221,93 @@ func (h *InquiryHandler) ParseQueueStatusResponse(data []byte) []*QueueHandleDet
 		case 3: // MQCFT_INTEGER
 			h.parseIntegerParameter(paramData, currentHandle)
 		}
+
+		offset += int(paramStrucLen)
 	}
 
 	// Add last handle if any
-	if handleCount > 0 && currentHandle.QueueName != "" {
+	if inGroup && currentHandle.QueueName != "" {
 		handles = append(handles, currentHandle)
 	}
 
-	h.logger.WithField("handles_found", len(handles)).Debug("Parsed queue handles from PCF response")
+	h.logger.WithField("handles_found", len(handles)).Info("Parsed queue handle details from PCF response")
 	return handles
 }
 
 func (h *InquiryHandler) parseStringParameter(paramData []byte, handle *QueueHandleDetails) {
-	if len(paramData) < 8 {
-		return
-	}
-
-	paramID := binary.BigEndian.Uint32(paramData[0:4])
-	strLen := binary.BigEndian.Uint32(paramData[4:8])
-
-	if 8+int(strLen) > len(paramData) {
-		return
-	}
-
-	strValue := strings.TrimRight(string(paramData[8:8+strLen]), "\x00 ")
-
-	switch paramID {
-	case 2016: // MQCA_Q_NAME
-		handle.QueueName = strValue
-	case 3501: // MQCA_CHANNEL_NAME (or MQCACF_CHANNEL_NAME)
-		handle.ChannelName = strValue
-	case 3502: // MQCA_CONNECTION_NAME (or MQCACF_CONNECTION_NAME)
-		handle.ConnectionName = strValue
-	case 2024: // MQCA_APPL_NAME
-		// This is application name
-	case 2549: // MQCACF_APPL_TAG
-		handle.ApplicationTag = strValue
-	case 3000: // MQCA_USER_IDENTIFIER or similar
-		handle.UserID = strValue
-	}
-}
-
-func (h *InquiryHandler) parseIntegerParameter(paramData []byte, handle *QueueHandleDetails) {
 	if len(paramData) < 12 {
 		return
 	}
 
+	// MQCFST structure
+	// Offset 0-3: Parameter ID
+	// Offset 4-7: CodedCharSetId
+	// Offset 8-11: StringLength
+	// Offset 12+: String data
+
 	paramID := binary.BigEndian.Uint32(paramData[0:4])
-	intValue := int32(binary.BigEndian.Uint32(paramData[8:12]))
+	strLen := binary.BigEndian.Uint32(paramData[8:12])
+
+	if 12+int(strLen) > len(paramData) {
+		return
+	}
+
+	strValue := strings.TrimRight(string(paramData[12:12+strLen]), "\x00 ")
+
+	switch paramID {
+	case 2016: // MQCA_Q_NAME
+		handle.QueueName = strValue
+	case 3501: // MQCACH_CHANNEL_NAME
+		handle.ChannelName = strValue
+	case 3502: // MQCACH_CONNECTION_NAME
+		handle.ConnectionName = strValue
+	case 2024: // MQCA_APPL_NAME
+		// Application name
+	case 2549: // MQCACF_APPL_TAG
+		handle.ApplicationTag = strValue
+	case 2046: // MQCA_USER_ID
+		handle.UserID = strValue
+	case 1238: // Input/Output mode indicators
+		// Handle INPUT/OUTPUT mode
+		if strings.Contains(strings.ToUpper(strValue), "INPUT") {
+			handle.InputMode = strValue
+		} else if strings.Contains(strings.ToUpper(strValue), "OUTPUT") {
+			handle.OutputMode = strValue
+		}
+	}
+}
+
+func (h *InquiryHandler) parseIntegerParameter(paramData []byte, handle *QueueHandleDetails) {
+	if len(paramData) < 8 {
+		return
+	}
+
+	// MQCFIN structure
+	// Offset 0-3: Parameter ID
+	// Offset 4-7: Value
+
+	paramID := binary.BigEndian.Uint32(paramData[0:4])
+	intValue := int32(binary.BigEndian.Uint32(paramData[4:8]))
 
 	switch paramID {
 	case 3002: // MQIACF_PROCESS_ID
 		handle.ProcessID = intValue
+	case 1238: // MQIACF_Q_STATUS_TYPE or similar - may indicate mode
+		// Check for input/output indicators
+	case 1411: // MQIACF_OPEN_INPUT_TYPE
+		if intValue > 0 {
+			handle.InputMode = "INPUT"
+		}
+	case 1412: // MQIACF_OPEN_OUTPUT
+		if intValue > 0 {
+			handle.OutputMode = "OUTPUT"
+		}
 	}
+}
+
+// appendInt32BE appends an int32 value in big-endian format
+func appendInt32BE(buf []byte, value int32) []byte {
+	b := make([]byte, 4)
+	binary.BigEndian.PutUint32(b, uint32(value))
+	return append(buf, b...)
 }

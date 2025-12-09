@@ -418,8 +418,11 @@ func (c *MQClient) GetQueueHandleDetailsByPCF(queueName string) ([]*HandleInfo, 
 
 	cmdQueue, err := c.qmgr.Open(od, ibmmq.MQOO_OUTPUT)
 	if err != nil {
-		c.logger.WithError(err).WithField("queue_name", queueName).
-			Debug("Failed to open command queue - handle inquiry unavailable")
+		c.logger.WithFields(map[string]interface{}{
+			"error":      err.Error(),
+			"queue_name": queueName,
+			"cmd_queue":  "SYSTEM.ADMIN.COMMAND.QUEUE",
+		}).Debug("Failed to open PCF command queue - handle inquiry unavailable")
 		return handles, nil // Not an error - this feature is optional
 	}
 	defer cmdQueue.Close(0)
@@ -435,7 +438,10 @@ func (c *MQClient) GetQueueHandleDetailsByPCF(queueName string) ([]*HandleInfo, 
 	// Send command
 	err = cmdQueue.Put(md, pmo, cmdMsg)
 	if err != nil {
-		c.logger.WithError(err).Debug("Failed to send PCF inquiry command")
+		c.logger.WithFields(map[string]interface{}{
+			"error":      err.Error(),
+			"queue_name": queueName,
+		}).Debug("Failed to send PCF inquiry command to SYSTEM.ADMIN.COMMAND.QUEUE")
 		return handles, nil
 	}
 
@@ -448,7 +454,11 @@ func (c *MQClient) GetQueueHandleDetailsByPCF(queueName string) ([]*HandleInfo, 
 
 	respQueue, err := c.qmgr.Open(odResp, ibmmq.MQOO_INPUT_AS_Q_DEF)
 	if err != nil {
-		c.logger.WithError(err).Debug("Failed to open response queue")
+		c.logger.WithFields(map[string]interface{}{
+			"error":      err.Error(),
+			"queue_name": queueName,
+			"resp_queue": "SYSTEM.ADMIN.COMMAND.RESPONSE.QUEUE",
+		}).Debug("Failed to open response queue - cannot retrieve PCF handle data")
 		return handles, nil
 	}
 	defer respQueue.Close(0)
@@ -463,7 +473,10 @@ func (c *MQClient) GetQueueHandleDetailsByPCF(queueName string) ([]*HandleInfo, 
 
 	datalen, err := respQueue.Get(mdResp, gmo, respData)
 	if err != nil {
-		c.logger.WithError(err).Debug("Failed to read PCF response")
+		c.logger.WithFields(map[string]interface{}{
+			"error":      err.Error(),
+			"queue_name": queueName,
+		}).Debug("Failed to read PCF response - timeout or queue empty")
 		return handles, nil
 	}
 
