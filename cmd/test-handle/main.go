@@ -34,7 +34,7 @@ func main() {
 	logger.SetOutput(os.Stdout)
 
 	// Create MQ client
-	client := mqclient.NewMQClient(cfg.MQ, logger)
+	client := mqclient.NewMQClient(&cfg.MQ, logger)
 
 	// Connect to MQ
 	if err := client.Connect(); err != nil {
@@ -57,7 +57,8 @@ func main() {
 	od.ObjectName = *queueName
 	od.ObjectType = ibmmq.MQOT_Q
 
-	queue, err := client.GetQueueManager().Open(od, openMode)
+	qmgr := client.GetQueueManager()
+	queue, err := qmgr.Open(od, openMode)
 	if err != nil {
 		fmt.Printf("Failed to open queue %s in %s mode: %v\n", *queueName, modeStr, err)
 		os.Exit(1)
@@ -116,6 +117,5 @@ func displayQueueStatus(client *mqclient.MQClient, queueName string, logger *log
 	logger.Printf("  Input Handles:      %d", info.OpenInputCount)
 	logger.Printf("  Output Handles:     %d", info.OpenOutputCount)
 	logger.Printf("  Max Queue Depth:    %d", info.MaxQueueDepth)
-	logger.Printf("  High Water Mark:    %d", info.HighQueueDepth)
 	logger.Printf("==========================================\n")
 }

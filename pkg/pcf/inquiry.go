@@ -31,6 +31,86 @@ type QueueHandleDetails struct {
 	OutputMode     string // "OUTPUT", "YES", "NO"
 }
 
+// BuildInquireConnectionCmd builds a PCF INQUIRE_Q command
+// This queries queue details that may include connection info
+// We use MQCMD_INQUIRE_Q (code 3) which is more reliable remotely
+func (h *InquiryHandler) BuildInquireConnectionCmd(queueName string) []byte {
+	// PCF Command Format (IBM MQ MQCMD_INQUIRE_Q = 3)
+	// Parameters:
+	// 1. MQCA_Q_NAME (2016) - Queue name to query
+
+	buf := make([]byte, 0, 512)
+
+	// PCF Header (40 bytes - MQCFH structure)
+	buf = appendInt32BE(buf, 11) // MQCFT_COMMAND_XR - command with reply expected
+
+	// StrucLength (40 bytes for the header)
+	buf = appendInt32BE(buf, 40)
+
+	// Version (MQCFH_VERSION_3 = 3)
+	buf = appendInt32BE(buf, 3)
+
+	// Command (MQCMD_INQUIRE_Q = 3) - simpler, more reliable
+	buf = appendInt32BE(buf, 3)
+
+	// MsgSeqNumber
+	buf = appendInt32BE(buf, 1)
+
+	// Control (MQCFC_LAST = 1)
+	buf = appendInt32BE(buf, 1)
+
+	// CompCode
+	buf = appendInt32BE(buf, 0)
+
+	// Reason
+	buf = appendInt32BE(buf, 0)
+
+	// ParameterCount
+	buf = appendInt32BE(buf, 1) // Just the queue name
+
+	// Reserved
+	buf = appendInt32BE(buf, 0)
+
+	// Parameter 1: Queue Name (MQCA_Q_NAME = 2016)
+	paramStart := len(buf)
+
+	// Type (MQCFT_STRING = 4)
+	buf = appendInt32BE(buf, 4)
+
+	// StrucLength (will be calculated)
+	paramLenPos := len(buf)
+	buf = appendInt32BE(buf, 0)
+
+	// Parameter (MQCA_Q_NAME = 2016)
+	buf = appendInt32BE(buf, 2016)
+
+	// CodedCharSetId (system default = 0)
+	buf = appendInt32BE(buf, 0)
+
+	// StringLength
+	qnameLen := len(queueName)
+	buf = appendInt32BE(buf, int32(qnameLen))
+
+	// String data (padded to 4-byte boundary)
+	buf = append(buf, []byte(queueName)...)
+	padding := (4 - (qnameLen % 4)) % 4
+	for i := 0; i < padding; i++ {
+		buf = append(buf, 0x00)
+	}
+
+	// Update parameter length
+	paramLen := len(buf) - paramStart
+	binary.BigEndian.PutUint32(buf[paramLenPos:], uint32(paramLen))
+
+	h.logger.WithFields(map[string]interface{}{
+		"queue_name": queueName,
+		"msg_size":   len(buf),
+		"command":    3, // MQCMD_INQUIRE_Q
+	}).Debug("Built INQUIRE_Q PCF command")
+
+	return buf
+}
+
 // BuildInquireQueueStatusCmd builds a PCF INQUIRE_QUEUE_STATUS command
 // This queries queue handle details similar to: DIS QS(queue_name) TYPE(HANDLE) ALL
 func (h *InquiryHandler) BuildInquireQueueStatusCmd(queueName string) []byte {
@@ -41,13 +121,12 @@ func (h *InquiryHandler) BuildInquireQueueStatusCmd(queueName string) []byte {
 
 	buf := make([]byte, 0, 512)
 
-	// PCF Header (20 bytes)
-	// Offset 0-3: Type (MQCFT_COMMAND = 1)
-	buf = appendInt32BE(buf, 1)
+	// PCF Header (40 bytes - MQCFH structure)
+	// Offset 0-3: Type (MQCFT_COMMAND_XR = 11 for command with reply expected)
+	buf = appendInt32BE(buf, 11) // MQCFT_COMMAND_XR
 
-	// Offset 4-7: StrucLength (will be updated at end)
-	strucLengthPos := len(buf)
-	buf = appendInt32BE(buf, 0)
+	// Offset 4-7: StrucLength (40 bytes for the header)
+	buf = appendInt32BE(buf, 40)
 
 	// Offset 8-11: Version (MQCFH_VERSION_3 = 3)
 	buf = appendInt32BE(buf, 3)
@@ -69,6 +148,9 @@ func (h *InquiryHandler) BuildInquireQueueStatusCmd(queueName string) []byte {
 
 	// Offset 32-35: ParameterCount
 	buf = appendInt32BE(buf, 2) // Will have 2 parameters
+
+	// Offset 36-39: Padding/reserved
+	buf = appendInt32BE(buf, 0)
 
 	// Parameter 1: Queue Name (MQCA_Q_NAME = 2016)
 	// MQCFST structure for string parameter
@@ -117,10 +199,6 @@ func (h *InquiryHandler) BuildInquireQueueStatusCmd(queueName string) []byte {
 
 	// Value (MQIACF_Q_STATUS_HANDLE = 2)
 	buf = appendInt32BE(buf, 2)
-
-	// Update structure length in header
-	totalLen := len(buf)
-	binary.BigEndian.PutUint32(buf[strucLengthPos:], uint32(totalLen))
 
 	h.logger.WithFields(map[string]interface{}{
 		"queue_name":  queueName,

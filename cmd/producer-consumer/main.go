@@ -220,6 +220,6 @@ func displayQueueStatus(client *mqclient.MQClient, queueName string, logger *log
 		return
 	}
 
-	logger.Infof("Queue Status %s: Depth=%d, InputHandles=%d, OutputHandles=%d, MaxDepth=%d, HighMark=%d",
-		queueName, info.CurrentDepth, info.OpenInputCount, info.OpenOutputCount, info.MaxQueueDepth, info.HighQueueDepth)
+	logger.Infof("Queue Status %s: Depth=%d, InputHandles=%d, OutputHandles=%d, MaxDepth=%d",
+		queueName, info.CurrentDepth, info.OpenInputCount, info.OpenOutputCount, info.MaxQueueDepth)
 }

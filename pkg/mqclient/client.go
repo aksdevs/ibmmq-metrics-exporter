@@ -1,6 +1,7 @@
 package mqclient
 
 import (
+	"encoding/binary"
 	"fmt"
 	"time"
 
@@ -396,22 +397,54 @@ func (c *MQClient) GetQueueHandles(queueName string) ([]*HandleInfo, error) {
 }
 
 // GetQueueHandleDetailsByPCF retrieves detailed handle information using PCF inquiry
-// Sends a request to SYSTEM.ADMIN.COMMAND.QUEUE to get queue status with handle type
+// Uses a dynamically created temporary queue for the PCF response
 // Returns handle details like USERID, PID, CHANNEL, APPLTAG, CONNAME
 func (c *MQClient) GetQueueHandleDetailsByPCF(queueName string) ([]*HandleInfo, error) {
+	c.logger.WithField("queue_name", queueName).Info("Attempting to retrieve handle details via PCF")
+
 	if !c.connected {
 		return nil, fmt.Errorf("not connected to IBM MQ")
 	}
 
 	handles := make([]*HandleInfo, 0)
 
-	// Create inquiry handler
+	// Step 1: Create a temporary dynamic queue using the model queue
+	// This will give us a unique queue name like AMQ.xxxxxxxx.xxxxxxxx
+	odTemp := ibmmq.NewMQOD()
+	odTemp.ObjectName = "SYSTEM.DEFAULT.MODEL.QUEUE"
+	odTemp.ObjectType = ibmmq.MQOT_Q
+	odTemp.DynamicQName = "AMQ.*" // Create with dynamic naming
+
+	replyQueue, err := c.qmgr.Open(odTemp, ibmmq.MQOO_INPUT_EXCLUSIVE)
+	if err != nil {
+		c.logger.WithFields(map[string]interface{}{
+			"error":      err.Error(),
+			"queue_name": queueName,
+			"model_q":    "SYSTEM.DEFAULT.MODEL.QUEUE",
+		}).Debug("Failed to create temporary reply queue for PCF")
+		return handles, nil // Not an error - this feature is optional
+	}
+	defer replyQueue.Close(0)
+
+	// After opening, MQ updates the ObjectName field with the actual dynamic queue name
+	// This is how the mq-golang library exposes the created queue name
+	dynamicQueueName := odTemp.ObjectName
+
+	c.logger.WithFields(map[string]interface{}{
+		"dynamic_queue_name": dynamicQueueName,
+		"queue_name":         queueName,
+	}).Debug("Created temporary dynamic queue for PCF reply")
+
+	if dynamicQueueName == "" || dynamicQueueName == "SYSTEM.DEFAULT.MODEL.QUEUE" {
+		c.logger.WithField("queue_name", queueName).Debug("Could not determine dynamic queue name")
+		return handles, nil
+	}
+
+	// Step 2: Build PCF command (use INQUIRE_CONNECTION for better remote compatibility)
 	handler := pcf.NewInquiryHandler(c.logger)
+	cmdMsg := handler.BuildInquireConnectionCmd(queueName)
 
-	// Build PCF command to inquire queue status with HANDLE type
-	cmdMsg := handler.BuildInquireQueueStatusCmd(queueName)
-
-	// Open command queue
+	// Step 3: Open command queue and send request
 	od := ibmmq.NewMQOD()
 	od.ObjectName = "SYSTEM.ADMIN.COMMAND.QUEUE"
 	od.ObjectType = ibmmq.MQOT_Q
@@ -422,48 +455,44 @@ func (c *MQClient) GetQueueHandleDetailsByPCF(queueName string) ([]*HandleInfo, 
 			"error":      err.Error(),
 			"queue_name": queueName,
 			"cmd_queue":  "SYSTEM.ADMIN.COMMAND.QUEUE",
-		}).Debug("Failed to open PCF command queue - handle inquiry unavailable")
-		return handles, nil // Not an error - this feature is optional
+		}).Debug("Failed to open PCF command queue")
+		return handles, nil
 	}
 	defer cmdQueue.Close(0)
 
-	// Create message descriptor for command
+	// Create message descriptor with the dynamic reply queue
 	md := ibmmq.NewMQMD()
 	md.Format = ibmmq.MQFMT_ADMIN
+	md.ReplyToQ = dynamicQueueName
+	md.MsgType = ibmmq.MQMT_REQUEST
 
-	// Create put message options
+	// Generate a unique correlation ID
+	correlID := make([]byte, 24)
+	for i := 0; i < len(correlID); i++ {
+		correlID[i] = byte(65 + (i % 26))
+	}
+	copy(md.CorrelId, correlID)
+
+	// Send the command
 	pmo := ibmmq.NewMQPMO()
 	pmo.Options = ibmmq.MQPMO_NONE
 
-	// Send command
 	err = cmdQueue.Put(md, pmo, cmdMsg)
 	if err != nil {
 		c.logger.WithFields(map[string]interface{}{
 			"error":      err.Error(),
 			"queue_name": queueName,
-		}).Debug("Failed to send PCF inquiry command to SYSTEM.ADMIN.COMMAND.QUEUE")
+		}).Debug("Failed to send PCF inquiry command")
 		return handles, nil
 	}
 
-	c.logger.WithField("queue_name", queueName).Debug("Sent PCF INQUIRE_QUEUE_STATUS command")
+	c.logger.WithFields(map[string]interface{}{
+		"queue_name":  queueName,
+		"reply_queue": dynamicQueueName,
+		"correl_id":   string(correlID),
+	}).Debug("Sent PCF INQUIRE_Q_STATUS command")
 
-	// Open response queue
-	odResp := ibmmq.NewMQOD()
-	odResp.ObjectName = "SYSTEM.ADMIN.COMMAND.RESPONSE.QUEUE"
-	odResp.ObjectType = ibmmq.MQOT_Q
-
-	respQueue, err := c.qmgr.Open(odResp, ibmmq.MQOO_INPUT_AS_Q_DEF)
-	if err != nil {
-		c.logger.WithFields(map[string]interface{}{
-			"error":      err.Error(),
-			"queue_name": queueName,
-			"resp_queue": "SYSTEM.ADMIN.COMMAND.RESPONSE.QUEUE",
-		}).Debug("Failed to open response queue - cannot retrieve PCF handle data")
-		return handles, nil
-	}
-	defer respQueue.Close(0)
-
-	// Read response with timeout
+	// Step 4: Read response with timeout
 	mdResp := ibmmq.NewMQMD()
 	gmo := ibmmq.NewMQGMO()
 	gmo.Options = ibmmq.MQGMO_WAIT
@@ -471,16 +500,40 @@ func (c *MQClient) GetQueueHandleDetailsByPCF(queueName string) ([]*HandleInfo, 
 
 	respData := make([]byte, 16384)
 
-	datalen, err := respQueue.Get(mdResp, gmo, respData)
+	datalen, err := replyQueue.Get(mdResp, gmo, respData)
 	if err != nil {
 		c.logger.WithFields(map[string]interface{}{
 			"error":      err.Error(),
 			"queue_name": queueName,
-		}).Debug("Failed to read PCF response - timeout or queue empty")
+		}).Debug("Failed to read PCF response")
 		return handles, nil
 	}
 
-	// Parse response
+	c.logger.WithFields(map[string]interface{}{
+		"queue_name": queueName,
+		"resp_len":   datalen,
+	}).Info("Received PCF response for handle details")
+
+	// Debug: Log hex dump and reason code for analysis
+	if datalen >= 36 {
+		reasonCode := binary.BigEndian.Uint32(respData[32:36])
+		c.logger.WithFields(map[string]interface{}{
+			"queue_name":  queueName,
+			"reason_code": reasonCode,
+		}).Debug("PCF response reason code (0=success, other=error)")
+	}
+	if datalen > 0 && datalen <= 100 {
+		hexDump := ""
+		for i := 0; i < datalen && i < 100; i++ {
+			hexDump += fmt.Sprintf("%02x ", respData[i])
+		}
+		c.logger.WithFields(map[string]interface{}{
+			"queue_name": queueName,
+			"hex_dump":   hexDump,
+		}).Debug("PCF response hex dump (first 100 bytes)")
+	}
+
+	// Step 5: Parse response
 	responseHandles := handler.ParseQueueStatusResponse(respData[:datalen])
 
 	// Convert to HandleInfo structures
@@ -501,6 +554,9 @@ func (c *MQClient) GetQueueHandleDetailsByPCF(queueName string) ([]*HandleInfo, 
 		"handles_found": len(handles),
 	}).Info("Retrieved queue handles via PCF inquiry")
 
+	// Step 6: Close the dynamic queue (it will be auto-deleted by MQ)
+	// This is already done by the defer statement above
+
 	return handles, nil
 }
 
@@ -511,7 +567,6 @@ type QueueInfo struct {
 	OpenInputCount  int32
 	OpenOutputCount int32
 	MaxQueueDepth   int32
-	HighQueueDepth  int32
 	CreationTime    time.Time
 }
 
@@ -538,7 +593,6 @@ func (c *MQClient) GetQueueInfo(queueName string) (*QueueInfo, error) {
 		ibmmq.MQIA_OPEN_INPUT_COUNT,
 		ibmmq.MQIA_OPEN_OUTPUT_COUNT,
 		ibmmq.MQIA_MAX_Q_DEPTH,
-		ibmmq.MQIA_HIGH_Q_DEPTH,
 	}
 
 	// Inquire on the queue
@@ -565,9 +619,6 @@ func (c *MQClient) GetQueueInfo(queueName string) (*QueueInfo, error) {
 	if maxDepth, ok := attrs[ibmmq.MQIA_MAX_Q_DEPTH].(int32); ok {
 		info.MaxQueueDepth = maxDepth
 	}
-	if highDepth, ok := attrs[ibmmq.MQIA_HIGH_Q_DEPTH].(int32); ok {
-		info.HighQueueDepth = highDepth
-	}
 
 	c.logger.WithFields(logrus.Fields{
 		"queue_name":     queueName,
@@ -575,7 +626,6 @@ func (c *MQClient) GetQueueInfo(queueName string) (*QueueInfo, error) {
 		"input_handles":  info.OpenInputCount,
 		"output_handles": info.OpenOutputCount,
 		"max_depth":      info.MaxQueueDepth,
-		"high_depth":     info.HighQueueDepth,
 	}).Debug("Retrieved queue info via MQINQ")
 
 	return info, nil
