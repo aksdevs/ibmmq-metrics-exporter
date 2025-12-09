@@ -1,3 +1,91 @@
+# ibmmq-go-stat-otel
+
+This repository collects IBM MQ statistics and exports them as Prometheus metrics.
+This README documents the recent implementation changes, how the collector queries
+handle information, and how to build & run the collector on Windows (PowerShell).
+
+**What changed (latest)**
+- **PCF improvements**: Implemented a dynamic reply-queue pattern for PCF commands using `SYSTEM.DEFAULT.MODEL.QUEUE` and `AMQ.*` dynamic queues. Added `BuildInquireConnectionCmd` (implemented via a reliable `INQUIRE_Q` fallback) in `pkg/pcf/inquiry.go`.
+- **Client-side PCF flow**: `pkg/mqclient/client.go` uses a dynamic temporary queue, sends a PCF request to `SYSTEM.ADMIN.COMMAND.QUEUE`, and reads replies from the dynamic queue.
+- **Robust fallback**: Collector uses `MQINQ` for reliable counts (open input/output handles) if PCF responses do not contain detailed handle parameters.
+- **Prometheus metrics**: `pkg/prometheus/collector.go` updated to collect handle counts and publish metrics. Detailed label fields (userid, pid, channel, appltag, conname) will be empty for client-binding scenarios where PCF doesn't return parameter data.
+
+**How it works (high level)**
+- Create dynamic reply queue from `SYSTEM.DEFAULT.MODEL.QUEUE` with `DynamicQName = "AMQ.*"`.
+- Build a PCF command message (PCF header + parameters).
+- Put the PCF message to `SYSTEM.ADMIN.COMMAND.QUEUE` with `ReplyToQ` set to the dynamic queue.
+- `Get` responses from the dynamic queue (the command server on the target QMGR replies there).
+- Parse PCF responses for groups of parameters representing connection/handle information.
+
+**Important note about remote PCF & limitations**
+- PCF commands can be issued remotely, but the command server on the target QM must be running and you need appropriate channels/transmission queues and authorities.
+- In many client-binding (remote) scenarios the PCF response contains only the header (no parameter groups) — the collector logs the response hex-dump and reason codes for debugging.
+- When PCF returns no handle parameter data, the collector falls back to `MQINQ` to obtain reliable open handle counts and exports metrics with empty detail labels.
+
+**Files changed (key)**
+- `pkg/pcf/inquiry.go` — Added/updated PCF command builders and parsing helpers.
+- `pkg/mqclient/client.go` — Implemented dynamic reply queue creation, PCF send/receive flow, hex-dump logging and reason-code logging, and robust fallback behavior.
+- `pkg/prometheus/collector.go` — Updated handle metrics collection, fallback to MQINQ counts, and added debug logs.
+
+**Build (Windows PowerShell)**
+1. Set the C compiler path used for cgo (MinGW-w64 example):
+
+```
+$env:CC="C:\mingw64\mingw64\bin\gcc.exe"
+```
+
+2. Build the collector:
+
+```
+cd d:\Go\ibmmq-go-stat-otel
+go build -o collector.exe .\cmd\collector
+```
+
+3. (Optional) Build producer-consumer test utility:
+
+```
+go build -o cmd/producer-consumer/producer-consumer.exe .\cmd\producer-consumer
+```
+
+**Run (PowerShell examples)**
+- Start the collector as a background job:
+
+```
+Start-Job -ScriptBlock { $env:CC="C:\mingw64\mingw64\bin\gcc.exe"; cd d:\Go\ibmmq-go-stat-otel; .\collector.exe --config configs\default.yaml --prometheus-port 9091 --log-level info 2>&1 } -Name collector
+```
+
+- Run the producer-consumer test (creates producer+consumer handles on a queue):
+
+```
+Start-Job -ScriptBlock { cd d:\Go\ibmmq-go-stat-otel; .\cmd\producer-consumer\producer-consumer.exe --config configs\default.yaml --queue TEST.QUEUE --interval 1s 2>&1 } -Name producer-consumer
+```
+
+**Query metrics**
+- Fetch metrics with PowerShell or curl:
+
+```
+# with PowerShell
+$metrics = Invoke-WebRequest -Uri http://localhost:9091/metrics
+$metrics.Content | Select-String "ibmmq_"
+
+# with curl
+curl http://localhost:9091/metrics | findstr /i "ibmmq_"
+```
+
+**Debugging tips**
+- Enable debug logging: start the collector with `--log-level debug` to see detailed logs.
+- The collector logs a hex dump of PCF responses and the PCF reason code when it receives a response; this helps determine why parameters are missing.
+- If you need detailed handle information remotely, ensure:
+  - The command server is running on the target QMGR.
+  - Sender/Receiver channels and a transmission queue exist between your local QM and the remote QM (so the remote command server can reply).
+  - The connecting user has appropriate authorities (`+connect`, `+inq`, etc.).
+
+**Where to look next**
+- If PCF still returns only headers, consider running a local agent on the target queue manager machine to perform PCF inquiries locally (this avoids client-binding restrictions).
+- Alternatively, ensure the remote QM has the full command infrastructure (command server, channels/transmission queues) and required authorities.
+
+If you want, I can also add a short troubleshooting page or scripts to automate the PowerShell commands.
+
 # IBM MQ Statistics and Accounting Collector
 
 A high-performance Go application that collects IBM MQ statistics and accounting data from queue managers and exposes them as Prometheus metrics with OpenTelemetry observability.

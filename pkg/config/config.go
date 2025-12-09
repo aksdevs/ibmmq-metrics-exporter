@@ -43,12 +43,14 @@ func (m *MQConfig) GetUser() string {
 
 // CollectorConfig holds collector-specific configuration
 type CollectorConfig struct {
-	StatsQueue      string        `mapstructure:"stats_queue" yaml:"stats_queue" json:"stats_queue"`
-	AccountingQueue string        `mapstructure:"accounting_queue" yaml:"accounting_queue" json:"accounting_queue"`
-	ResetStats      bool          `mapstructure:"reset_stats" yaml:"reset_stats" json:"reset_stats"`
-	Interval        time.Duration `mapstructure:"interval" yaml:"interval" json:"interval"`
-	MaxCycles       int           `mapstructure:"max_cycles" yaml:"max_cycles" json:"max_cycles"`
-	Continuous      bool          `mapstructure:"continuous" yaml:"continuous" json:"continuous"`
+	StatsQueue             string        `mapstructure:"stats_queue" yaml:"stats_queue" json:"stats_queue"`
+	AccountingQueue        string        `mapstructure:"accounting_queue" yaml:"accounting_queue" json:"accounting_queue"`
+	ResetStats             bool          `mapstructure:"reset_stats" yaml:"reset_stats" json:"reset_stats"`
+	Interval               time.Duration `mapstructure:"interval" yaml:"interval" json:"interval"`
+	MaxCycles              int           `mapstructure:"max_cycles" yaml:"max_cycles" json:"max_cycles"`
+	Continuous             bool          `mapstructure:"continuous" yaml:"continuous" json:"continuous"`
+	MonitorAllQueues       bool          `mapstructure:"monitor_all_queues" yaml:"monitor_all_queues" json:"monitor_all_queues"`
+	QueueExclusionPatterns []string      `mapstructure:"queue_exclusion_patterns" yaml:"queue_exclusion_patterns" json:"queue_exclusion_patterns"`
 }
 
 // PrometheusConfig holds Prometheus exporter configuration
@@ -94,12 +96,14 @@ func DefaultConfig() *Config {
 			CipherSpec:     "",
 		},
 		Collector: CollectorConfig{
-			StatsQueue:      "", // Will be loaded from YAML
-			AccountingQueue: "", // Will be loaded from YAML
-			ResetStats:      false,
-			Interval:        60 * time.Second, // Sensible default
-			MaxCycles:       0,                // 0 means infinite
-			Continuous:      false,
+			StatsQueue:             "", // Will be loaded from YAML
+			AccountingQueue:        "", // Will be loaded from YAML
+			ResetStats:             false,
+			Interval:               60 * time.Second, // Sensible default
+			MaxCycles:              0,                // 0 means infinite
+			Continuous:             false,
+			MonitorAllQueues:       true,       // Monitor all queues by default
+			QueueExclusionPatterns: []string{}, // No exclusions by default; controlled via YAML with "!" prefix
 		},
 		Prometheus: PrometheusConfig{
 			Port:       9091,

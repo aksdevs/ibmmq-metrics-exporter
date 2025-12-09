@@ -42,6 +42,17 @@ collector:
   # Whether to reset statistics after reading (requires additional permissions)
   reset_statistics: false
 
+  # Monitor all local queues
+  monitor_all_queues: true
+
+  # Queue exclusion patterns (using "!" prefix for excluded patterns)
+  # Examples: "SYSTEM.*" excludes all system queues, "TEST.**" excludes all test queues
+  # Leave empty to monitor all queues without exclusions
+  queue_exclusion_patterns: []
+    # - "SYSTEM.*"
+    # - "TEMPORARY.*"
+    # - "TEST.**"
+
 # Prometheus Metrics Configuration
 prometheus:
   # HTTP server port

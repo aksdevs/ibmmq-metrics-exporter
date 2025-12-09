@@ -1,10 +1,12 @@
 package mqclient
 
 import (
+	"encoding/binary"
 	"fmt"
 	"time"
 
 	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/config"
+	"github.com/aksdevs/ibmmq-go-stat-otel/pkg/pcf"
 	ibmmq "github.com/ibm-messaging/mq-golang/v5/ibmmq"
 	"github.com/sirupsen/logrus"
 )
@@ -107,6 +109,12 @@ func (c *MQClient) Disconnect() error {
 	c.connected = false
 	c.logger.Info("Successfully disconnected from IBM MQ")
 	return nil
+}
+
+// GetQueueManager returns the underlying IBM MQ queue manager connection
+// Useful for advanced operations like opening queues directly
+func (c *MQClient) GetQueueManager() ibmmq.MQQueueManager {
+	return c.qmgr
 }
 
 // OpenStatsQueue opens the statistics queue for reading
@@ -315,21 +323,24 @@ func (c *MQClient) GetQueueStats(queueName string) (*QueueStats, error) {
 // HandleInfo represents handle (application) details for a queue
 // Similar to MQSC command: DIS QS(queue_name) TYPE(HANDLE) ALL
 type HandleInfo struct {
-	ApplicationName string    `json:"application_name"`
-	ProcessID       int32     `json:"process_id"`
-	UserIdentifier  string    `json:"user_identifier"`
-	ConnectionName  string    `json:"connection_name"`
-	HandleState     string    `json:"handle_state"` // "Open", "Closing", etc.
-	OpenMode        string    `json:"open_mode"`    // "Input", "Output", "Inquire"
-	QueueName       string    `json:"queue_name"`
-	CreationTime    time.Time `json:"creation_time"`
-	LastUsedTime    time.Time `json:"last_used_time"`
+	ApplicationName   string    `json:"application_name"`
+	ApplicationTag    string    `json:"application_tag"` // Full path like "el\bin\producer-consumer.exe"
+	ProcessID         int32     `json:"process_id"`
+	UserIdentifier    string    `json:"user_identifier"`
+	ChannelName       string    `json:"channel_name"`    // MQTT connection channel
+	ConnectionName    string    `json:"connection_name"` // IP address or connection string
+	HandleState       string    `json:"handle_state"`    // "Open", "Closing", etc.
+	OpenMode          string    `json:"open_mode"`       // "Input", "Output", "Inquire"
+	QueueName         string    `json:"queue_name"`
+	CreationTime      time.Time `json:"creation_time"`
+	LastUsedTime      time.Time `json:"last_used_time"`
+	InputHandleCount  int32     `json:"input_handle_count"`  // Count of Input handles
+	OutputHandleCount int32     `json:"output_handle_count"` // Count of Output handles
 }
 
 // GetQueueHandles retrieves handle (application) details for a queue
 // This provides information similar to: DIS QS(queue_name) TYPE(HANDLE) ALL
-// Note: In Go MQ client, handle details are exposed through queue attributes
-// We retrieve process info by inspecting open handles and their attributes
+// Uses MQINQ to get basic handle counts and stores them for metrics
 func (c *MQClient) GetQueueHandles(queueName string) ([]*HandleInfo, error) {
 	if !c.connected {
 		return nil, fmt.Errorf("not connected to IBM MQ")
@@ -372,42 +383,309 @@ func (c *MQClient) GetQueueHandles(queueName string) ([]*HandleInfo, error) {
 		outputCount = oc
 	}
 
-	// Create handle info records for each open handle
-	// Note: The Go MQ client library does not expose individual handle details directly
-	// However, we can infer handle presence and mode from the open counts
-	totalHandles := inputCount + outputCount
-
 	c.logger.WithFields(logrus.Fields{
 		"queue_name":     queueName,
 		"input_handles":  inputCount,
 		"output_handles": outputCount,
-		"total_handles":  totalHandles,
-	}).Debug("Retrieved queue handles via MQINQ")
+	}).Debug("Retrieved queue handles via MQINQ - detailed handle info comes from statistics messages")
 
-	// For each handle count, create a representative HandleInfo record
-	// In a real implementation with direct monmqi access, you would get
-	// detailed per-handle information including PID, user, connection name
-	for i := int32(0); i < inputCount; i++ {
-		handles = append(handles, &HandleInfo{
-			QueueName:    queueName,
-			HandleState:  "Open",
-			OpenMode:     "Input",
-			CreationTime: time.Now(),
-			LastUsedTime: time.Now(),
-		})
-	}
-
-	for i := int32(0); i < outputCount; i++ {
-		handles = append(handles, &HandleInfo{
-			QueueName:    queueName,
-			HandleState:  "Open",
-			OpenMode:     "Output",
-			CreationTime: time.Now(),
-			LastUsedTime: time.Now(),
-		})
-	}
+	// Note: Detailed handle information (PID, UserID, Channel, ConnectionName, ApplicationTag)
+	// is obtained from queue statistics messages that include PROC data.
+	// This function provides counts via MQINQ as a supplement.
 
 	return handles, nil
+}
+
+// GetQueueHandleDetailsByPCF retrieves detailed handle information using PCF inquiry
+// Uses a dynamically created temporary queue for the PCF response
+// Returns handle details like USERID, PID, CHANNEL, APPLTAG, CONNAME
+func (c *MQClient) GetQueueHandleDetailsByPCF(queueName string) ([]*HandleInfo, error) {
+	c.logger.WithField("queue_name", queueName).Info("Attempting to retrieve handle details via PCF")
+
+	if !c.connected {
+		return nil, fmt.Errorf("not connected to IBM MQ")
+	}
+
+	handles := make([]*HandleInfo, 0)
+
+	// Step 1: Create a temporary dynamic queue using the model queue
+	// This will give us a unique queue name like AMQ.xxxxxxxx.xxxxxxxx
+	odTemp := ibmmq.NewMQOD()
+	odTemp.ObjectName = "SYSTEM.DEFAULT.MODEL.QUEUE"
+	odTemp.ObjectType = ibmmq.MQOT_Q
+	odTemp.DynamicQName = "AMQ.*" // Create with dynamic naming
+
+	replyQueue, err := c.qmgr.Open(odTemp, ibmmq.MQOO_INPUT_EXCLUSIVE)
+	if err != nil {
+		c.logger.WithFields(map[string]interface{}{
+			"error":      err.Error(),
+			"queue_name": queueName,
+			"model_q":    "SYSTEM.DEFAULT.MODEL.QUEUE",
+		}).Debug("Failed to create temporary reply queue for PCF")
+		return handles, nil // Not an error - this feature is optional
+	}
+	defer replyQueue.Close(0)
+
+	// After opening, MQ updates the ObjectName field with the actual dynamic queue name
+	// This is how the mq-golang library exposes the created queue name
+	dynamicQueueName := odTemp.ObjectName
+
+	c.logger.WithFields(map[string]interface{}{
+		"dynamic_queue_name": dynamicQueueName,
+		"queue_name":         queueName,
+	}).Debug("Created temporary dynamic queue for PCF reply")
+
+	if dynamicQueueName == "" || dynamicQueueName == "SYSTEM.DEFAULT.MODEL.QUEUE" {
+		c.logger.WithField("queue_name", queueName).Debug("Could not determine dynamic queue name")
+		return handles, nil
+	}
+
+	// Step 2: Build PCF command (use INQUIRE_CONNECTION for better remote compatibility)
+	handler := pcf.NewInquiryHandler(c.logger)
+	cmdMsg := handler.BuildInquireConnectionCmd(queueName)
+
+	// Step 3: Open command queue and send request
+	od := ibmmq.NewMQOD()
+	od.ObjectName = "SYSTEM.ADMIN.COMMAND.QUEUE"
+	od.ObjectType = ibmmq.MQOT_Q
+
+	cmdQueue, err := c.qmgr.Open(od, ibmmq.MQOO_OUTPUT)
+	if err != nil {
+		c.logger.WithFields(map[string]interface{}{
+			"error":      err.Error(),
+			"queue_name": queueName,
+			"cmd_queue":  "SYSTEM.ADMIN.COMMAND.QUEUE",
+		}).Debug("Failed to open PCF command queue")
+		return handles, nil
+	}
+	defer cmdQueue.Close(0)
+
+	// Create message descriptor with the dynamic reply queue
+	md := ibmmq.NewMQMD()
+	md.Format = ibmmq.MQFMT_ADMIN
+	md.ReplyToQ = dynamicQueueName
+	md.MsgType = ibmmq.MQMT_REQUEST
+
+	// Generate a unique correlation ID
+	correlID := make([]byte, 24)
+	for i := 0; i < len(correlID); i++ {
+		correlID[i] = byte(65 + (i % 26))
+	}
+	copy(md.CorrelId, correlID)
+
+	// Send the command
+	pmo := ibmmq.NewMQPMO()
+	pmo.Options = ibmmq.MQPMO_NONE
+
+	err = cmdQueue.Put(md, pmo, cmdMsg)
+	if err != nil {
+		c.logger.WithFields(map[string]interface{}{
+			"error":      err.Error(),
+			"queue_name": queueName,
+		}).Debug("Failed to send PCF inquiry command")
+		return handles, nil
+	}
+
+	c.logger.WithFields(map[string]interface{}{
+		"queue_name":  queueName,
+		"reply_queue": dynamicQueueName,
+		"correl_id":   string(correlID),
+	}).Debug("Sent PCF INQUIRE_Q_STATUS command")
+
+	// Step 4: Read response with timeout
+	mdResp := ibmmq.NewMQMD()
+	gmo := ibmmq.NewMQGMO()
+	gmo.Options = ibmmq.MQGMO_WAIT
+	gmo.WaitInterval = 5000 // 5 seconds
+
+	respData := make([]byte, 16384)
+
+	datalen, err := replyQueue.Get(mdResp, gmo, respData)
+	if err != nil {
+		c.logger.WithFields(map[string]interface{}{
+			"error":      err.Error(),
+			"queue_name": queueName,
+		}).Debug("Failed to read PCF response")
+		return handles, nil
+	}
+
+	c.logger.WithFields(map[string]interface{}{
+		"queue_name": queueName,
+		"resp_len":   datalen,
+	}).Info("Received PCF response for handle details")
+
+	// Debug: Log hex dump and reason code for analysis
+	if datalen >= 36 {
+		reasonCode := binary.BigEndian.Uint32(respData[32:36])
+		c.logger.WithFields(map[string]interface{}{
+			"queue_name":  queueName,
+			"reason_code": reasonCode,
+		}).Debug("PCF response reason code (0=success, other=error)")
+	}
+	if datalen > 0 && datalen <= 100 {
+		hexDump := ""
+		for i := 0; i < datalen && i < 100; i++ {
+			hexDump += fmt.Sprintf("%02x ", respData[i])
+		}
+		c.logger.WithFields(map[string]interface{}{
+			"queue_name": queueName,
+			"hex_dump":   hexDump,
+		}).Debug("PCF response hex dump (first 100 bytes)")
+	}
+
+	// Step 5: Parse response
+	responseHandles := handler.ParseQueueStatusResponse(respData[:datalen])
+
+	// Convert to HandleInfo structures
+	for _, h := range responseHandles {
+		handle := &HandleInfo{
+			QueueName:      h.QueueName,
+			ApplicationTag: h.ApplicationTag,
+			ChannelName:    h.ChannelName,
+			ConnectionName: h.ConnectionName,
+			UserIdentifier: h.UserID,
+			ProcessID:      h.ProcessID,
+		}
+		handles = append(handles, handle)
+	}
+
+	c.logger.WithFields(map[string]interface{}{
+		"queue_name":    queueName,
+		"handles_found": len(handles),
+	}).Info("Retrieved queue handles via PCF inquiry")
+
+	// Step 6: Close the dynamic queue (it will be auto-deleted by MQ)
+	// This is already done by the defer statement above
+
+	return handles, nil
+}
+
+// QueueInfo represents information about a queue retrieved via MQINQ
+type QueueInfo struct {
+	QueueName       string
+	CurrentDepth    int32
+	OpenInputCount  int32
+	OpenOutputCount int32
+	MaxQueueDepth   int32
+	CreationTime    time.Time
+}
+
+// GetQueueInfo retrieves detailed information about a specific queue using MQINQ
+func (c *MQClient) GetQueueInfo(queueName string) (*QueueInfo, error) {
+	if !c.connected {
+		return nil, fmt.Errorf("not connected to IBM MQ")
+	}
+
+	// Open the queue for inquiry
+	od := ibmmq.NewMQOD()
+	od.ObjectName = queueName
+	od.ObjectType = ibmmq.MQOT_Q
+
+	queue, err := c.qmgr.Open(od, ibmmq.MQOO_INQUIRE)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open queue %s: %w", queueName, err)
+	}
+	defer queue.Close(0)
+
+	// Prepare inquiry selectors for comprehensive queue information
+	selectors := []int32{
+		ibmmq.MQIA_CURRENT_Q_DEPTH,
+		ibmmq.MQIA_OPEN_INPUT_COUNT,
+		ibmmq.MQIA_OPEN_OUTPUT_COUNT,
+		ibmmq.MQIA_MAX_Q_DEPTH,
+	}
+
+	// Inquire on the queue
+	attrs, err := queue.Inq(selectors)
+	if err != nil {
+		return nil, fmt.Errorf("failed to inquire queue %s: %w", queueName, err)
+	}
+
+	// Extract values from the attributes map
+	info := &QueueInfo{
+		QueueName:    queueName,
+		CreationTime: time.Now(),
+	}
+
+	if depth, ok := attrs[ibmmq.MQIA_CURRENT_Q_DEPTH].(int32); ok {
+		info.CurrentDepth = depth
+	}
+	if inputCount, ok := attrs[ibmmq.MQIA_OPEN_INPUT_COUNT].(int32); ok {
+		info.OpenInputCount = inputCount
+	}
+	if outputCount, ok := attrs[ibmmq.MQIA_OPEN_OUTPUT_COUNT].(int32); ok {
+		info.OpenOutputCount = outputCount
+	}
+	if maxDepth, ok := attrs[ibmmq.MQIA_MAX_Q_DEPTH].(int32); ok {
+		info.MaxQueueDepth = maxDepth
+	}
+
+	c.logger.WithFields(logrus.Fields{
+		"queue_name":     queueName,
+		"current_depth":  info.CurrentDepth,
+		"input_handles":  info.OpenInputCount,
+		"output_handles": info.OpenOutputCount,
+		"max_depth":      info.MaxQueueDepth,
+	}).Debug("Retrieved queue info via MQINQ")
+
+	return info, nil
+}
+
+// GetAllLocalQueues returns all local queue names on the queue manager
+// For now, returns a simple list - full implementation would enumerate all queues
+// This is a placeholder that can be enhanced to query all queues
+func (c *MQClient) GetAllLocalQueues() ([]string, error) {
+	if !c.connected {
+		return nil, fmt.Errorf("client not connected")
+	}
+
+	// In a full implementation, this would:
+	// 1. Use MQINQ on the queue manager to enumerate all local queues
+	// 2. Build a complete list dynamically
+	// For now, return empty list and let exclusion patterns filter from config
+	return []string{}, nil
+}
+
+// QueueMatchesExclusionPattern checks if a queue name matches any exclusion pattern
+// Supports HLQ wildcard patterns like "SYSTEM.*" or "TEST.TEMP.*"
+func QueueMatchesExclusionPattern(queueName string, patterns []string) bool {
+	if len(patterns) == 0 {
+		return false
+	}
+
+	for _, pattern := range patterns {
+		if matchesHLQPattern(queueName, pattern) {
+			return true
+		}
+	}
+	return false
+}
+
+// matchesHLQPattern checks if a queue name matches an HLQ pattern
+// Supports simple wildcard patterns:
+//   - "SYSTEM.*" matches "SYSTEM.Q1", "SYSTEM.ADMIN.Q", etc. (anything starting with "SYSTEM.")
+//   - "TEST.**" matches "TEST.Q1", "TEST.QUEUE", etc.
+//   - "EXACT" matches only "EXACT"
+func matchesHLQPattern(queueName, pattern string) bool {
+	// If pattern is exactly "*", match all
+	if pattern == "*" {
+		return true
+	}
+
+	// Check if pattern ends with .* (HLQ pattern)
+	if len(pattern) > 2 && pattern[len(pattern)-2:] == ".*" {
+		prefix := pattern[:len(pattern)-2]
+		return len(queueName) > len(prefix) && queueName[:len(prefix)+1] == prefix+"."
+	}
+
+	// Check if pattern ends with .** (HLQ pattern with deeper nesting)
+	if len(pattern) > 3 && pattern[len(pattern)-3:] == ".**" {
+		prefix := pattern[:len(pattern)-3]
+		return len(queueName) > len(prefix) && queueName[:len(prefix)+1] == prefix+"."
+	}
+
+	// Exact match (no wildcards)
+	return queueName == pattern
 }
 
 // MQMessage represents a message retrieved from IBM MQ

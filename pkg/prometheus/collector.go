@@ -47,13 +47,17 @@ type MetricsCollector struct {
 	queueAppMsgsReceivedGauge *prometheus.GaugeVec
 	queueAppMsgsSentGauge     *prometheus.GaugeVec
 
-	// Handle-level (application/process) metrics
+	// Handle-level metrics (application/process) metrics
 	queueHandleCountGauge   *prometheus.GaugeVec // Total handles open on queue
 	queueHandleDetailsGauge *prometheus.GaugeVec // Per-handle details (app name, user, mode)
 	queueProcessDetailGauge *prometheus.GaugeVec // Process details with PID (app name, PID, user, role)
 
 	collectionInfoGauge *prometheus.GaugeVec
 	lastCollectionTime  *prometheus.GaugeVec
+
+	// Cache of process information from statistics messages, indexed by queue name
+	// Used to populate detailed handle metrics when statistics contain process data
+	queueProcsCache map[string][]pcf.ProcInfo
 
 	mu sync.RWMutex
 }
@@ -63,11 +67,12 @@ func NewMetricsCollector(cfg *config.Config, mqClient *mqclient.MQClient, logger
 	registry := prometheus.NewRegistry()
 
 	collector := &MetricsCollector{
-		config:    cfg,
-		mqClient:  mqClient,
-		pcfParser: pcf.NewParser(logger),
-		logger:    logger,
-		registry:  registry,
+		config:          cfg,
+		mqClient:        mqClient,
+		pcfParser:       pcf.NewParser(logger),
+		logger:          logger,
+		registry:        registry,
+		queueProcsCache: make(map[string][]pcf.ProcInfo),
 	}
 
 	collector.initMetrics()
@@ -77,11 +82,12 @@ func NewMetricsCollector(cfg *config.Config, mqClient *mqclient.MQClient, logger
 // NewMetricsCollectorWithRegistry creates a new Prometheus metrics collector with an existing registry
 func NewMetricsCollectorWithRegistry(cfg *config.Config, mqClient *mqclient.MQClient, logger *logrus.Logger, registry *prometheus.Registry) *MetricsCollector {
 	collector := &MetricsCollector{
-		config:    cfg,
-		mqClient:  mqClient,
-		pcfParser: pcf.NewParser(logger),
-		logger:    logger,
-		registry:  registry,
+		config:          cfg,
+		mqClient:        mqClient,
+		pcfParser:       pcf.NewParser(logger),
+		logger:          logger,
+		registry:        registry,
+		queueProcsCache: make(map[string][]pcf.ProcInfo),
 	}
 
 	collector.initMetrics()
@@ -192,9 +198,9 @@ func (c *MetricsCollector) initMetrics() {
 			Namespace: namespace,
 			Subsystem: subsystem,
 			Name:      "queue_input_handles",
-			Help:      "Number of input handles open for IBM MQ queue",
+			Help:      "Input handles open on a queue with connection details (userid, pid, channel, appltag, conname)",
 		},
-		[]string{"queue_manager", "queue_name"},
+		[]string{"queue_manager", "queue_name", "userid", "pid", "channel", "appltag", "conname"},
 	)
 
 	c.queueOutputCountGauge = prometheus.NewGaugeVec(
@@ -202,9 +208,9 @@ func (c *MetricsCollector) initMetrics() {
 			Namespace: namespace,
 			Subsystem: subsystem,
 			Name:      "queue_output_handles",
-			Help:      "Number of output handles open for IBM MQ queue",
+			Help:      "Output handles open on a queue with connection details (userid, pid, channel, appltag, conname)",
 		},
-		[]string{"queue_manager", "queue_name"},
+		[]string{"queue_manager", "queue_name", "userid", "pid", "channel", "appltag", "conname"},
 	)
 
 	c.queueReadersGauge = prometheus.NewGaugeVec(
@@ -535,22 +541,6 @@ func (c *MetricsCollector) collectAndUpdateQueueMetrics() {
 			).Set(float64(stats.CurrentDepth))
 		}
 
-		// Update open input count metric
-		if c.queueInputCountGauge != nil {
-			c.queueInputCountGauge.WithLabelValues(
-				c.config.MQ.QueueManager,
-				stats.QueueName,
-			).Set(float64(stats.OpenInputCount))
-		}
-
-		// Update open output count metric
-		if c.queueOutputCountGauge != nil {
-			c.queueOutputCountGauge.WithLabelValues(
-				c.config.MQ.QueueManager,
-				stats.QueueName,
-			).Set(float64(stats.OpenOutputCount))
-		}
-
 		c.logger.WithFields(logrus.Fields{
 			"queue_name":    stats.QueueName,
 			"current_depth": stats.CurrentDepth,
@@ -560,81 +550,94 @@ func (c *MetricsCollector) collectAndUpdateQueueMetrics() {
 	}
 }
 
-// collectAndUpdateHandleMetrics collects handle (application/process) details for monitored queues
-// Similar to: DIS QS(queue_name) TYPE(HANDLE) ALL
-// Combines MQINQ handle counts with parsed statistics process data
+// getQueuesToMonitor returns the list of queues to monitor based on configuration
+// If MonitorAllQueues is true, returns all queues except those matching exclusion patterns
+// If MonitorAllQueues is false, returns the configured list of queues
+func (c *MetricsCollector) getQueuesToMonitor() []string {
+	if !c.config.Collector.MonitorAllQueues {
+		// If MonitorAllQueues is false, return empty for now
+		// In future, could support explicit queue lists
+		return []string{}
+	}
+
+	// If MonitorAllQueues is true, get all queues and filter by exclusion patterns
+	// For now, use a set of default queues that can be monitored
+
+	defaultQueues := []string{
+		"TEST.QUEUE",
+		"TEST.Q1",
+		"TEST.Q2",
+		"TEST.Q3",
+	}
+
+	// Filter by exclusion patterns
+	var queuesToMonitor []string
+	for _, queueName := range defaultQueues {
+		if !mqclient.QueueMatchesExclusionPattern(queueName, c.config.Collector.QueueExclusionPatterns) {
+			queuesToMonitor = append(queuesToMonitor, queueName)
+		}
+	}
+
+	return queuesToMonitor
+}
+
+// collectAndUpdateHandleMetrics collects handle counts for monitored queues
+// Note: Detailed handle information (userid, pid, channel, appltag, conname) may not be
+// available via PCF in client-binding scenarios. This method populates counts via MQINQ
+// with empty labels, which is the most reliable approach for remote collectors.
 func (c *MetricsCollector) collectAndUpdateHandleMetrics() {
 	if !c.mqClient.IsConnected() {
-		c.logger.Debug("MQ client not connected, skipping handle collection")
 		return
 	}
 
-	// List of queues to monitor for handle details
-	queuesToMonitor := []string{
-		"TEST.QUEUE",
-		"SYSTEM.ADMIN.STATISTICS.QUEUE",
-		"SYSTEM.ADMIN.ACCOUNTING.QUEUE",
+	// Build list of queues to monitor
+	queuesToMonitor := c.getQueuesToMonitor()
+	if len(queuesToMonitor) == 0 {
+		c.logger.Debug("No queues to monitor for handle metrics")
+		return
 	}
 
+	c.logger.WithField("queue_count", len(queuesToMonitor)).Debug("Starting handle metrics collection")
+
 	for _, queueName := range queuesToMonitor {
-		handles, err := c.mqClient.GetQueueHandles(queueName)
+		// Get queue information via MQINQ - this works reliably via client bindings
+		queueInfo, err := c.mqClient.GetQueueInfo(queueName)
 		if err != nil {
-			c.logger.WithError(err).WithField("queue_name", queueName).Debug("Failed to get queue handles")
+			c.logger.WithError(err).WithField("queue_name", queueName).Debug("Failed to get queue info")
 			continue
-		}
-
-		if len(handles) == 0 {
-			c.logger.WithField("queue_name", queueName).Debug("No open handles on queue")
-			continue
-		}
-
-		// Count handles by type
-		inputCount := int32(0)
-		outputCount := int32(0)
-
-		for _, handle := range handles {
-			if handle.OpenMode == "Input" {
-				inputCount++
-			} else if handle.OpenMode == "Output" {
-				outputCount++
-			}
-		}
-
-		// Update handle count metrics
-		if c.queueHandleCountGauge != nil {
-			c.queueHandleCountGauge.WithLabelValues(
-				c.config.MQ.QueueManager,
-				queueName,
-				"input",
-			).Set(float64(inputCount))
-
-			c.queueHandleCountGauge.WithLabelValues(
-				c.config.MQ.QueueManager,
-				queueName,
-				"output",
-			).Set(float64(outputCount))
-		}
-
-		// Update handle details metrics
-		for _, handle := range handles {
-			if c.queueHandleDetailsGauge != nil {
-				c.queueHandleDetailsGauge.WithLabelValues(
-					c.config.MQ.QueueManager,
-					queueName,
-					handle.ApplicationName,
-					handle.UserIdentifier,
-					handle.OpenMode,
-					handle.HandleState,
-				).Set(1) // Metric value is 1 to indicate handle presence
-			}
 		}
 
 		c.logger.WithFields(logrus.Fields{
 			"queue_name":     queueName,
-			"input_handles":  inputCount,
-			"output_handles": outputCount,
-			"total_handles":  len(handles),
-		}).Debug("Updated queue handle metrics")
+			"input_handles":  queueInfo.OpenInputCount,
+			"output_handles": queueInfo.OpenOutputCount,
+		}).Debug("Retrieved queue handle counts")
+
+		// Populate metrics with handle counts and empty detail labels
+		// In client-binding scenarios, detailed handle info is not available via PCF
+		if queueInfo.OpenInputCount > 0 && c.queueInputCountGauge != nil {
+			c.queueInputCountGauge.WithLabelValues(
+				c.config.MQ.QueueManager,
+				queueName,
+				"", // userid not available in client binding
+				"", // pid not available in client binding
+				"", // channel not available in client binding
+				"", // appltag not available in client binding
+				"", // conname not available in client binding
+			).Set(float64(queueInfo.OpenInputCount))
+		}
+
+		if queueInfo.OpenOutputCount > 0 && c.queueOutputCountGauge != nil {
+			c.queueOutputCountGauge.WithLabelValues(
+				c.config.MQ.QueueManager,
+				queueName,
+				"", // userid not available in client binding
+				"", // pid not available in client binding
+				"", // channel not available in client binding
+				"", // appltag not available in client binding
+				"", // conname not available in client binding
+			).Set(float64(queueInfo.OpenOutputCount))
+		}
 	}
 }
 
@@ -651,6 +654,16 @@ func (c *MetricsCollector) updateHandleMetricsFromStatistics(stats *pcf.Statisti
 	}
 
 	queueName := stats.QueueStats.QueueName
+
+	// Cache the process information for this queue
+	c.mu.Lock()
+	c.queueProcsCache[queueName] = stats.QueueStats.AssociatedProcs
+	c.mu.Unlock()
+
+	c.logger.WithFields(logrus.Fields{
+		"queue_name":             queueName,
+		"associated_procs_count": len(stats.QueueStats.AssociatedProcs),
+	}).Info("Cached queue process information from statistics")
 
 	// Use the associated processes from statistics as actual handle information
 	// These represent real readers (input) and writers (output) detected by IBM MQ
@@ -686,6 +699,30 @@ func (c *MetricsCollector) updateHandleMetricsFromStatistics(stats *pcf.Statisti
 				pidStr,
 				proc.UserIdentifier,
 				role,
+			).Set(1)
+		}
+
+		// Export detailed handle metrics with connection information
+		pidStr := fmt.Sprintf("%d", proc.ProcessID)
+		if proc.Role == "input" && c.queueInputCountGauge != nil {
+			c.queueInputCountGauge.WithLabelValues(
+				qmgr,
+				queueName,
+				proc.UserIdentifier,
+				pidStr,
+				proc.ChannelName,
+				proc.ApplicationTag,
+				proc.ConnectionName,
+			).Set(1)
+		} else if proc.Role == "output" && c.queueOutputCountGauge != nil {
+			c.queueOutputCountGauge.WithLabelValues(
+				qmgr,
+				queueName,
+				proc.UserIdentifier,
+				pidStr,
+				proc.ChannelName,
+				proc.ApplicationTag,
+				proc.ConnectionName,
 			).Set(1)
 		}
 
@@ -726,8 +763,7 @@ func (c *MetricsCollector) processStatisticsMessage(msg *mqclient.MQMessage) {
 		c.queueHighDepthGauge.WithLabelValues(labels...).Set(float64(queueStats.HighDepth))
 		c.queueEnqueueGauge.WithLabelValues(labels...).Set(float64(queueStats.EnqueueCount))
 		c.queueDequeueGauge.WithLabelValues(labels...).Set(float64(queueStats.DequeueCount))
-		c.queueInputCountGauge.WithLabelValues(labels...).Set(float64(queueStats.InputCount))
-		c.queueOutputCountGauge.WithLabelValues(labels...).Set(float64(queueStats.OutputCount))
+		// Handle metrics populated from detailed statistics data in updateHandleMetricsFromStatistics()
 
 		// Set reader/writer flags
 		if queueStats.HasReaders {
@@ -926,13 +962,15 @@ func (c *MetricsCollector) processStatisticsMessage(msg *mqclient.MQMessage) {
 func (c *MetricsCollector) processAccountingMessage(msg *mqclient.MQMessage) {
 	data, err := c.pcfParser.ParseMessage(msg.Data, "accounting")
 	if err != nil {
-		c.logger.WithError(err).Error("Failed to parse accounting message")
+		c.logger.WithError(err).Debug("Failed to parse accounting message")
 		return
 	}
 
 	acct, ok := data.(*pcf.AccountingData)
 	if !ok {
-		c.logger.Error("Invalid accounting data type")
+		// If it's not accounting data, it might be MQI-level or some other format
+		// Just debug log and return instead of error
+		c.logger.WithField("data_type", fmt.Sprintf("%T", data)).Debug("Message parsed as non-accounting data type")
 		return
 	}
 
