@@ -142,7 +142,7 @@ public:
         const std::vector<std::vector<uint8_t>>& responses);
 
 private:
-    static void append_int32_be(std::vector<uint8_t>& buf, int32_t value);
+    static void append_int32(std::vector<uint8_t>& buf, int32_t value);
 
     // Build a generic PCF header + optional string/int params
     static std::vector<uint8_t> build_pcf_cmd(int32_t command, int32_t param_count);
