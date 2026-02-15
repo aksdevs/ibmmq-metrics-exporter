@@ -23,7 +23,7 @@ collector:
   keep_running: true
   reconnect_interval: "5s"
   use_status: true
-  use_statistics: false
+  use_statistics: true
   use_reset_q_stats: false
   rediscover_interval: "0s"
 
