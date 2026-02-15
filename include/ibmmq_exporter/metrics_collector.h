@@ -1,0 +1,143 @@
+#pragma once
+
+#include <map>
+#include <memory>
+#include <mutex>
+#include <string>
+#include <vector>
+
+#include <prometheus/counter.h>
+#include <prometheus/gauge.h>
+#include <prometheus/registry.h>
+
+#include "ibmmq_exporter/config.h"
+#include "ibmmq_exporter/mqclient.h"
+#include "ibmmq_exporter/pcf_parser.h"
+
+namespace ibmmq_exporter {
+
+class MetricsCollector {
+public:
+    MetricsCollector(const Config& config,
+                     MQClient& mq_client,
+                     std::shared_ptr<prometheus::Registry> registry);
+
+    // Perform a full metrics collection cycle
+    void collect_metrics();
+
+    // Reset all metrics
+    void reset_metrics();
+
+    // Update MQ client reference (for reconnection)
+    void set_mq_client(MQClient& client) { mq_client_ = &client; }
+
+    std::shared_ptr<prometheus::Registry> get_registry() const { return registry_; }
+
+private:
+    void init_metrics();
+
+    // Message collection & processing
+    std::vector<MQMessage> collect_messages(const std::string& queue_type);
+    void update_metrics_from_messages(const std::vector<MQMessage>& stats_msgs,
+                                     const std::vector<MQMessage>& acct_msgs);
+    void process_statistics_message(const MQMessage& msg);
+    void process_accounting_message(const MQMessage& msg);
+
+    // Queue metric collection via MQINQ
+    void collect_and_update_queue_metrics();
+    void collect_and_update_handle_metrics();
+    std::vector<std::string> get_queues_to_monitor();
+
+    // Extended status collection via PCF
+    void collect_channel_status();
+    void collect_topic_status();
+    void collect_sub_status();
+    void collect_qmgr_status();
+    void collect_cluster_status();
+    void collect_usage_status();
+
+    void update_handle_metrics_from_statistics(const StatisticsData& stats);
+    void set_baseline_metrics(int stats_count, int acct_count);
+
+    // Update MQI statistics into Prometheus gauges
+    void update_mqi_gauges(const MQIStatistics& mqi, const std::string& qmgr);
+
+    // Metadata label helpers
+    std::map<std::string, std::string> add_meta_labels(std::map<std::string, std::string> labels) const;
+
+    const Config& config_;
+    MQClient*     mq_client_;
+    PCFParser     pcf_parser_;
+    std::shared_ptr<prometheus::Registry> registry_;
+    std::mutex    mu_;
+
+    // Queue metrics
+    prometheus::Family<prometheus::Gauge>* queue_depth_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_high_depth_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_enqueue_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_dequeue_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_input_handles_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_output_handles_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_readers_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_writers_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_process_{nullptr};
+
+    // Per-queue per-app metrics
+    prometheus::Family<prometheus::Gauge>* queue_app_puts_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_app_gets_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_app_msgs_received_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_app_msgs_sent_{nullptr};
+
+    // Handle-level metrics
+    prometheus::Family<prometheus::Gauge>* queue_handle_count_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_handle_info_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_process_detail_{nullptr};
+
+    // Channel metrics (from statistics messages)
+    prometheus::Family<prometheus::Gauge>* channel_messages_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_bytes_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_batches_{nullptr};
+
+    // Channel status metrics (from PCF inquiry)
+    prometheus::Family<prometheus::Gauge>* channel_status_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_status_msgs_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_bytes_sent_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_bytes_received_{nullptr};
+
+    // Topic status metrics
+    prometheus::Family<prometheus::Gauge>* topic_pub_count_{nullptr};
+    prometheus::Family<prometheus::Gauge>* topic_sub_count_{nullptr};
+
+    // Subscription status metrics
+    prometheus::Family<prometheus::Gauge>* sub_durable_{nullptr};
+    prometheus::Family<prometheus::Gauge>* sub_type_{nullptr};
+
+    // QM status metrics
+    prometheus::Family<prometheus::Gauge>* qmgr_status_{nullptr};
+    prometheus::Family<prometheus::Gauge>* qmgr_connection_count_{nullptr};
+    prometheus::Family<prometheus::Gauge>* qmgr_chinit_status_{nullptr};
+
+    // Cluster metrics
+    prometheus::Family<prometheus::Gauge>* cluster_qmgr_status_{nullptr};
+
+    // z/OS Buffer Pool metrics
+    prometheus::Family<prometheus::Gauge>* usage_bp_free_{nullptr};
+    prometheus::Family<prometheus::Gauge>* usage_bp_total_{nullptr};
+
+    // z/OS Page Set metrics
+    prometheus::Family<prometheus::Gauge>* usage_ps_total_{nullptr};
+    prometheus::Family<prometheus::Gauge>* usage_ps_unused_{nullptr};
+
+    // MQI metrics (map-based for all operations)
+    std::map<std::string, prometheus::Family<prometheus::Gauge>*> mqi_metrics_;
+
+    // Collection info
+    prometheus::Family<prometheus::Gauge>* collection_info_{nullptr};
+    prometheus::Family<prometheus::Gauge>* last_collection_time_{nullptr};
+    prometheus::Family<prometheus::Gauge>* publications_count_{nullptr};
+
+    // Cache of process info per queue
+    std::map<std::string, std::vector<ProcInfo>> queue_procs_cache_;
+};
+
+} // namespace ibmmq_exporter

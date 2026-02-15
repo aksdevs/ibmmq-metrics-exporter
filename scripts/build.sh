@@ -1,147 +1,117 @@
-#!/bin/bash
+#!/usr/bin/env bash
+# Build script for IBM MQ Metrics Exporter (C++)
+#
+# Usage:
+#   ./build.sh                    # Default: gcc, Release, stub MQ off
+#   ./build.sh --compiler clang   # Use Clang
+#   ./build.sh --stub-mq --clean  # Stub MQ, clean build
+#   ./build.sh --debug            # Debug build
+#   ./build.sh --mq-home /opt/mqm # Set MQ installation path
 
-# Enhanced build script for IBM MQ Statistics Collector with Docker BuildKit support
-# Usage: ./scripts/build.sh [binary|docker|all] [version] [target]
+set -euo pipefail
 
-set -e
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+BUILD_DIR="${PROJECT_ROOT}/build"
 
-# Colors for output
-RED='\033[0;31m'
-GREEN='\033[0;32m'
-YELLOW='\033[1;33m'
-BLUE='\033[0;34m'
-NC='\033[0m' # No Color
+# Defaults
+COMPILER="gcc"
+BUILD_TYPE="Release"
+STUB_MQ="OFF"
+CLEAN=false
+MQ_HOME=""
 
-# Configuration
-BUILD_TYPE=${1:-"all"}
-VERSION=${2:-"dev"}
-DOCKER_TARGET=${3:-"final"}
-BUILD_TIME=$(date -u '+%Y-%m-%d_%H:%M:%S')
-GIT_COMMIT=$(git rev-parse --short HEAD 2>/dev/null || echo "unknown")
-IMAGE_NAME="ibmmq-collector"
+# Parse arguments
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --compiler)   COMPILER="$2"; shift 2 ;;
+        --debug)      BUILD_TYPE="Debug"; shift ;;
+        --release)    BUILD_TYPE="Release"; shift ;;
+        --stub-mq)    STUB_MQ="ON"; shift ;;
+        --clean)      CLEAN=true; shift ;;
+        --mq-home)    MQ_HOME="$2"; shift 2 ;;
+        --help|-h)
+            echo "Usage: $0 [options]"
+            echo "  --compiler gcc|clang   Compiler (default: gcc)"
+            echo "  --debug                Debug build"
+            echo "  --release              Release build (default)"
+            echo "  --stub-mq             Use stub MQ headers"
+            echo "  --clean                Clean before building"
+            echo "  --mq-home PATH         IBM MQ installation path"
+            exit 0
+            ;;
+        *) echo "Unknown option: $1"; exit 1 ;;
+    esac
+done
 
-echo -e "${BLUE}🏗️  Building IBM MQ Statistics Collector${NC}"
-echo -e "${YELLOW}Build type: $BUILD_TYPE${NC}"
-echo -e "${YELLOW}Version: $VERSION${NC}"
-echo -e "${YELLOW}Build time: $BUILD_TIME${NC}"
-echo -e "${YELLOW}Git commit: $GIT_COMMIT${NC}"
+echo "=== IBM MQ Metrics Exporter - C++ Build ==="
+echo "Compiler:   ${COMPILER}"
+echo "Build Type: ${BUILD_TYPE}"
+echo "Stub MQ:    ${STUB_MQ}"
+echo ""
 
-# Set build flags
-LDFLAGS="-X main.version=$VERSION -X main.commit=$GIT_COMMIT -X main.date=$BUILD_TIME"
+# Clean
+if [[ "$CLEAN" == true ]] && [[ -d "$BUILD_DIR" ]]; then
+    echo "Cleaning build directory..."
+    rm -rf "$BUILD_DIR"
+fi
 
-# Function to build binaries
-build_binaries() {
-    echo -e "${BLUE}📦 Building cross-platform binaries...${NC}"
-    
-    # Create build directory
-    mkdir -p dist
-    
-    # Note: IBM MQ client requires CGO, so we can't cross-compile easily
-    # We'll build for the current platform with CGO for full functionality
-    echo -e "${YELLOW}Building with IBM MQ client support (CGO enabled)...${NC}"
-    
-    # Check if we have IBM MQ development libraries
-    if [ -d "/opt/mqm" ] || [ -n "$MQ_INSTALLATION_PATH" ]; then
-        echo -e "${GREEN}IBM MQ libraries found, building with full MQ support${NC}"
-        CGO_ENABLED=1 go build -ldflags "$LDFLAGS" -o dist/ibmmq-collector ./cmd/collector
-    else
-        echo -e "${YELLOW}IBM MQ libraries not found, building without CGO (limited functionality)${NC}"
-        CGO_ENABLED=0 go build -ldflags "$LDFLAGS" -o dist/ibmmq-collector-no-cgo ./cmd/collector
-    fi
-    
-    echo -e "${GREEN}✅ Binary build complete!${NC}"
-    ls -la dist/
-}
+mkdir -p "$BUILD_DIR"
 
-# Function to build Docker image with BuildKit
-build_docker() {
-    echo -e "${BLUE}🐳 Building Docker image with BuildKit...${NC}"
-    
-    # Enable BuildKit
-    export DOCKER_BUILDKIT=1
-    export BUILDKIT_PROGRESS=plain
-    
-    # Build command with optimizations
-    build_cmd="docker build"
-    
-    # Add BuildKit cache options for faster rebuilds
-    build_cmd+=" --cache-from=${IMAGE_NAME}:cache"
-    build_cmd+=" --cache-from=${IMAGE_NAME}:latest"
-    
-    # Set target stage
-    echo -e "${YELLOW}🎯 Target: ${DOCKER_TARGET}${NC}"
-    build_cmd+=" --target=${DOCKER_TARGET}"
-    
-    # Add build arguments
-    build_cmd+=" --build-arg VERSION=${VERSION}"
-    build_cmd+=" --build-arg BUILD_TIME=${BUILD_TIME}"
-    build_cmd+=" --build-arg GIT_COMMIT=${GIT_COMMIT}"
-    
-    # Add tags
-    build_cmd+=" -t ${IMAGE_NAME}:${VERSION}"
-    build_cmd+=" -t ${IMAGE_NAME}:latest"
-    
-    # Add context
-    build_cmd+=" ."
-    
-    # Execute build
-    echo -e "${BLUE}Executing: ${build_cmd}${NC}"
-    eval $build_cmd
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ Docker build completed successfully!${NC}"
-        docker images | grep $IMAGE_NAME | head -3
-        
-        # Run tests if this is a test build
-        if [ "$DOCKER_TARGET" = "test" ]; then
-            echo -e "${BLUE}🧪 Running tests...${NC}"
-            docker run --rm ${IMAGE_NAME}:${VERSION}
-        fi
-    else
-        echo -e "${RED}❌ Docker build failed!${NC}"
-        exit 1
-    fi
-}
+# CMake arguments
+CMAKE_ARGS=(
+    -S "$PROJECT_ROOT"
+    -B "$BUILD_DIR"
+    -DCMAKE_BUILD_TYPE="$BUILD_TYPE"
+    -DIBMMQ_EXPORTER_USE_STUB_MQ="$STUB_MQ"
+)
 
-# Function to run tests
-run_tests() {
-    echo -e "${BLUE}🧪 Running tests...${NC}"
-    go test -v ./pkg/config ./pkg/pcf
-    
-    if [ $? -eq 0 ]; then
-        echo -e "${GREEN}✅ All tests passed!${NC}"
-    else
-        echo -e "${RED}❌ Tests failed!${NC}"
-        exit 1
-    fi
-}
+if [[ -n "$MQ_HOME" ]]; then
+    CMAKE_ARGS+=(-DMQ_HOME="$MQ_HOME")
+fi
 
-# Main build logic
-case $BUILD_TYPE in
-    "binary")
-        build_binaries
+# Compiler selection
+case "$COMPILER" in
+    gcc)
+        CMAKE_ARGS+=(
+            -DCMAKE_C_COMPILER=gcc
+            -DCMAKE_CXX_COMPILER=g++
+        )
         ;;
-    "docker")
-        build_docker
-        ;;
-    "test")
-        run_tests
-        ;;
-    "docker-test")
-        DOCKER_TARGET="test"
-        build_docker
-        ;;
-    "all")
-        echo -e "${BLUE}🚀 Building everything...${NC}"
-        run_tests
-        build_binaries
-        build_docker
+    clang)
+        CMAKE_ARGS+=(
+            -DCMAKE_C_COMPILER=clang
+            -DCMAKE_CXX_COMPILER=clang++
+        )
         ;;
     *)
-        echo -e "${RED}❌ Unknown build type: $BUILD_TYPE${NC}"
-        echo -e "${YELLOW}Usage: $0 [binary|docker|test|docker-test|all] [version] [docker_target]${NC}"
+        echo "Unknown compiler: ${COMPILER}"
         exit 1
         ;;
 esac
 
-echo -e "${GREEN}🎉 Build process complete!${NC}"
+# Prefer Ninja if available
+if command -v ninja &>/dev/null; then
+    CMAKE_ARGS+=(-G Ninja)
+fi
+
+# Configure
+echo "Configuring with CMake..."
+cmake "${CMAKE_ARGS[@]}"
+
+# Build
+echo ""
+echo "Building..."
+cmake --build "$BUILD_DIR" --config "$BUILD_TYPE" --parallel "$(nproc 2>/dev/null || echo 4)"
+
+# Report
+BINARY="${BUILD_DIR}/ibmmq-exporter"
+if [[ -f "$BINARY" ]]; then
+    echo ""
+    echo "Build successful!"
+    echo "Binary: ${BINARY}"
+    ls -lh "$BINARY"
+else
+    echo ""
+    echo "Build completed. Check ${BUILD_DIR} for output."
+fi
