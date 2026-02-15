@@ -436,12 +436,10 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
         responses.emplace_back(resp_buf.begin(), resp_buf.begin() + datalen);
 
         // Check if this is the last response (Control == MQCFC_LAST)
+        // Control field is at offset 20 in MQCFH (native byte order after MQGMO_CONVERT)
         if (datalen >= 24) {
-            // Control field is at offset 20 in PCF header (big-endian)
-            uint32_t control = (static_cast<uint32_t>(resp_buf[20]) << 24) |
-                               (static_cast<uint32_t>(resp_buf[21]) << 16) |
-                               (static_cast<uint32_t>(resp_buf[22]) << 8)  |
-                                static_cast<uint32_t>(resp_buf[23]);
+            uint32_t control = 0;
+            std::memcpy(&control, &resp_buf[20], sizeof(control));
             if (control == 1) break; // MQCFC_LAST
         }
     }

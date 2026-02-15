@@ -28,12 +28,7 @@ collector:
   rediscover_interval: "0s"
 
   # Monitored object patterns (empty = monitor all)
-  monitored_queues:
-    - "APP1.REQ"
-    - "APP2.REQ"
-    - "DEV.QUEUE.1"
-    - "SYSTEM.ADMIN.STATISTICS.QUEUE"
-    - "SYSTEM.ADMIN.ACCOUNTING.QUEUE"
+  monitored_queues: []
   monitored_channels: []
   monitored_topics: []
   monitored_subscriptions: []
