@@ -1,42 +1,40 @@
-# If you prefer the allow list template instead of the deny list, see community template:
-# https://github.com/github/gitignore/blob/main/community/Golang/Go.AllowList.gitignore
-#
-# Binaries for programs and plugins
-*.exe
-*.exe~
-*.dll
+# C++ Build artifacts
+/build/
+/out/
+*.o
+*.obj
+*.a
+*.lib
 *.so
 *.dylib
+*.dll
+*.exe
 
-# Test binary, built with `go test -c`
-*.test
+# CMake
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+compile_commands.json
+CTestTestfile.cmake
+_deps/
+CMakeSettings.json
+.cmake/
 
-# Code coverage profiles and other test artifacts
-*.out
-coverage.*
-*.coverprofile
-profile.cov
+# IDE and editor files
+.idea/
+.vscode/
+.claude
+*.swp
+*.swo
+*~
+.DS_Store
+Thumbs.db
+*.user
 
-# Dependency directories (remove the comment below to include it)
-# vendor/
-
-# Go workspace file
-go.work
-go.work.sum
-
-# Environment and configuration files
+# Environment and credentials
 .env
 *.env
 *.local
-
-# Build and deployment
-/dist/
-/build/
-/bin/
-/target/
-
-# Docker
-.dockerignore
 
 # Logs and temp files
 *.log
@@ -45,24 +43,9 @@ go.work.sum
 /logs/
 /tmp/
 
-# IDE and editor files
-.idea/
-.vscode/
-*.swp
-*.swo
-*~
-.DS_Store
-Thumbs.db
-
 # IBM MQ specific
-sample-runs/*.mqsc
-sample-runs/pcf-data/
 *.pcf
-
-# Test and development artifacts
-/coverage/
-/benchmarks/
-*.pprof
+sample-runs/
 
 # Runtime and cache
 *.pid
