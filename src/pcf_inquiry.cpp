@@ -546,25 +546,8 @@ std::vector<QueueHandleDetails> PCFInquiry::parse_queue_status_response(
         offset += param_struc_len;
     }
 
-    // Handle non-grouped responses (INQUIRE_Q returns one queue per response message)
-    if (!in_group && current.queue_name.empty()) {
-        // Try to extract queue name from flat (non-grouped) parameters
-        QueueHandleDetails flat;
-        size_t off = MQCFH_SIZE;
-        while (off + 8 <= len) {
-            uint32_t ptype = read_int32(data + off);
-            uint32_t plen  = read_int32(data + off + 4);
-            if (plen == 0 || off + plen > len) break;
-            if (ptype == 4) { // MQCFT_STRING
-                parse_string_param(data + off + 8, plen - 8, flat);
-            } else if (ptype == 3) { // MQCFT_INTEGER
-                parse_integer_param(data + off + 8, plen - 8, flat);
-            }
-            off += plen;
-        }
-        if (!flat.queue_name.empty())
-            handles.push_back(flat);
-    } else if (in_group && !current.queue_name.empty()) {
+    // Push the last parsed entry (works for both grouped and flat responses)
+    if (!current.queue_name.empty()) {
         handles.push_back(current);
     }
 
