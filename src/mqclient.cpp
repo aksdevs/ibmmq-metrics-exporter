@@ -610,27 +610,42 @@ std::vector<std::string> MQClient::discover_queues(const std::string& pattern) {
 void MQClient::subscribe_to_topic(const std::string& topic_string) {
     if (!connected_) return;
 
+    // Create our own dynamic queue instead of MQSO_MANAGED so we can
+    // explicitly delete it on cleanup (managed queues rely on QM
+    // housekeeping which doesn't always clean up promptly).
+    MQHOBJ dest_hobj = 0;
+    std::string dest_name;
+    try {
+        dest_hobj = open_queue("SYSTEM.DEFAULT.MODEL.QUEUE",
+                               MQOO_INPUT_EXCLUSIVE, "EXPORTER.PUB.*", dest_name);
+    } catch (const std::exception& e) {
+        spdlog::warn("Failed to create subscription destination queue: {}", e.what());
+        return;
+    }
+
     MQSD sd = {MQSD_DEFAULT};
-    sd.Options = MQSO_CREATE | MQSO_NON_DURABLE | MQSO_MANAGED | MQSO_FAIL_IF_QUIESCING;
+    sd.Options = MQSO_CREATE | MQSO_NON_DURABLE | MQSO_FAIL_IF_QUIESCING;
 
     // Set the topic string
     std::string topic_copy = topic_string;
     sd.ObjectString.VSPtr = topic_copy.data();
     sd.ObjectString.VSLength = static_cast<MQLONG>(topic_copy.size());
 
-    MQHOBJ hobj = 0;
     MQHOBJ hsub = 0;
     MQLONG cc = 0, rc = 0;
 
-    MQSUB(hconn_, &sd, &hobj, &hsub, &cc, &rc);
+    MQSUB(hconn_, &sd, &dest_hobj, &hsub, &cc, &rc);
 
     if (cc == MQCC_FAILED) {
         spdlog::warn("Failed to subscribe to topic '{}' (RC={})", topic_string, rc);
+        // Clean up the queue we created
+        MQLONG cc2 = 0, rc2 = 0;
+        MQCLOSE(hconn_, &dest_hobj, MQCO_DELETE_PURGE, &cc2, &rc2);
         return;
     }
 
-    subscriptions_.push_back({hobj, hsub});
-    spdlog::info("Subscribed to topic: {}", topic_string);
+    subscriptions_.push_back({dest_hobj, hsub});
+    spdlog::info("Subscribed to topic: {} (dest queue: {})", topic_string, dest_name);
 }
 
 std::vector<MQMessage> MQClient::receive_publications() {
@@ -677,21 +692,35 @@ std::vector<MQMessage> MQClient::receive_publications() {
 std::optional<MQMessage> MQClient::subscribe_and_get(const std::string& topic_string) {
     if (!connected_) return std::nullopt;
 
+    // Create our own dynamic queue instead of MQSO_MANAGED so we can
+    // explicitly delete it after use.
+    MQHOBJ dest_hobj = 0;
+    std::string dest_name;
+    try {
+        dest_hobj = open_queue("SYSTEM.DEFAULT.MODEL.QUEUE",
+                               MQOO_INPUT_EXCLUSIVE, "EXPORTER.SUB.*", dest_name);
+    } catch (const std::exception& e) {
+        spdlog::debug("Failed to create subscription queue for '{}': {}", topic_string, e.what());
+        return std::nullopt;
+    }
+
     MQSD sd = {MQSD_DEFAULT};
-    sd.Options = MQSO_CREATE | MQSO_NON_DURABLE | MQSO_MANAGED | MQSO_FAIL_IF_QUIESCING;
+    sd.Options = MQSO_CREATE | MQSO_NON_DURABLE | MQSO_FAIL_IF_QUIESCING;
 
     std::string topic_copy = topic_string;
     sd.ObjectString.VSPtr = topic_copy.data();
     sd.ObjectString.VSLength = static_cast<MQLONG>(topic_copy.size());
 
-    MQHOBJ hobj = 0;
     MQHOBJ hsub = 0;
     MQLONG cc = 0, rc = 0;
 
-    MQSUB(hconn_, &sd, &hobj, &hsub, &cc, &rc);
+    MQSUB(hconn_, &sd, &dest_hobj, &hsub, &cc, &rc);
 
     if (cc == MQCC_FAILED) {
         spdlog::debug("Failed to subscribe to '{}' (RC={})", topic_string, rc);
+        // Clean up the queue we created
+        MQLONG cc2 = 0, rc2 = 0;
+        MQCLOSE(hconn_, &dest_hobj, MQCO_DELETE_PURGE, &cc2, &rc2);
         return std::nullopt;
     }
 
@@ -705,23 +734,23 @@ std::optional<MQMessage> MQClient::subscribe_and_get(const std::string& topic_st
     gmo.WaitInterval = 3000; // 3 seconds for retained publication to arrive
 
     MQLONG datalen = 0;
-    MQGET(hconn_, hobj, &md, &gmo,
+    MQGET(hconn_, dest_hobj, &md, &gmo,
           static_cast<MQLONG>(buffer.size()),
           buffer.data(), &datalen, &cc, &rc);
 
-    // Close subscription handle with MQCO_REMOVE_SUB to explicitly remove
-    // the non-durable subscription and trigger managed destination cleanup
+    // Remove the subscription first (stops new publications arriving)
     MQLONG cc2 = 0, rc2 = 0;
     if (hsub != 0) {
         MQCLOSE(hconn_, &hsub, MQCO_REMOVE_SUB, &cc2, &rc2);
         if (cc2 == MQCC_FAILED)
-            spdlog::debug("Failed to close subscription handle for '{}' (RC={})", topic_string, rc2);
+            spdlog::debug("Failed to remove subscription for '{}' (RC={})", topic_string, rc2);
     }
-    // Close the managed destination queue handle
-    if (hobj != 0) {
-        MQCLOSE(hconn_, &hobj, MQCO_NONE, &cc2, &rc2);
+
+    // Delete the queue we created (purges any remaining messages)
+    if (dest_hobj != 0) {
+        MQCLOSE(hconn_, &dest_hobj, MQCO_DELETE_PURGE, &cc2, &rc2);
         if (cc2 == MQCC_FAILED)
-            spdlog::debug("Failed to close managed destination for '{}' (RC={})", topic_string, rc2);
+            spdlog::debug("Failed to delete subscription queue for '{}' (RC={})", topic_string, rc2);
     }
 
     if (cc == MQCC_FAILED || datalen <= 0) {
@@ -735,7 +764,7 @@ std::optional<MQMessage> MQClient::subscribe_and_get(const std::string& topic_st
     msg.msg_type = md.MsgType;
     msg.format = std::string(md.Format, sizeof(md.Format));
 
-    // Strip MQRFH2 header if present (managed subscriptions wrap PCF in MQRFH2)
+    // Strip MQRFH2 header if present (subscriptions may wrap PCF in MQRFH2)
     strip_mqrfh2(msg);
 
     spdlog::debug("Got retained message from '{}', size={}", topic_string, msg.data.size());
@@ -743,50 +772,23 @@ std::optional<MQMessage> MQClient::subscribe_and_get(const std::string& topic_st
 }
 
 void MQClient::unsubscribe_all() {
-    // Drain and close each managed subscription.
-    // Managed destination queues are only auto-deleted by the QM when they have
-    // no remaining messages. We must drain unread publications before closing.
-    constexpr size_t DRAIN_BUF_SIZE = 4 * 1024;
-    std::vector<uint8_t> drain_buf(DRAIN_BUF_SIZE);
-
     for (auto& sub : subscriptions_) {
         MQLONG cc = 0, rc = 0;
 
-        // 1. Drain all remaining messages from the managed destination queue.
-        //    Publications accumulate between collection cycles; if not drained,
-        //    the QM will keep the managed queue alive after unsubscribe.
-        if (sub.hobj != 0) {
-            int drained = 0;
-            for (int i = 0; i < 10000; ++i) {
-                MQMD md = {MQMD_DEFAULT};
-                MQGMO gmo = {MQGMO_DEFAULT};
-                gmo.Options = MQGMO_NO_WAIT;
-                MQLONG datalen = 0;
-                MQGET(hconn_, sub.hobj, &md, &gmo,
-                      static_cast<MQLONG>(drain_buf.size()),
-                      drain_buf.data(), &datalen, &cc, &rc);
-                if (cc == MQCC_FAILED) break;
-                ++drained;
-            }
-            if (drained > 0)
-                spdlog::debug("Drained {} messages from managed destination before unsubscribe", drained);
-        }
-
-        // 2. Remove the subscription (no more publications will arrive)
+        // 1. Remove the subscription (no more publications will arrive)
         if (sub.hsub != 0) {
             MQCLOSE(hconn_, &sub.hsub, MQCO_REMOVE_SUB, &cc, &rc);
             if (cc == MQCC_FAILED)
                 spdlog::debug("Failed to remove subscription (RC={})", rc);
         }
 
-        // 3. Close the managed destination queue handle.
-        //    For temporary dynamic queues (which managed destinations are),
-        //    MQCO_NONE acts as MQCO_DELETE_PURGE — the queue is deleted.
-        //    Since we drained messages above, deletion should succeed cleanly.
+        // 2. Delete the destination queue we created (purges any remaining messages).
+        //    Since we create our own queues (not MQSO_MANAGED), MQCO_DELETE_PURGE
+        //    explicitly removes the queue without relying on QM housekeeping.
         if (sub.hobj != 0) {
-            MQCLOSE(hconn_, &sub.hobj, MQCO_NONE, &cc, &rc);
+            MQCLOSE(hconn_, &sub.hobj, MQCO_DELETE_PURGE, &cc, &rc);
             if (cc == MQCC_FAILED)
-                spdlog::debug("Failed to close managed destination (RC={})", rc);
+                spdlog::debug("Failed to delete subscription destination (RC={})", rc);
         }
     }
     spdlog::info("Removed {} subscriptions", subscriptions_.size());
