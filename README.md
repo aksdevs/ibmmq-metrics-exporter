@@ -122,6 +122,30 @@ collector:
     - "#"            # All topics
 ```
 
+### Resource Monitoring (CPU/Memory/Disk Metrics)
+
+To collect CPU, memory, and disk utilization metrics from your queue manager, resource monitoring must be enabled:
+
+```bash
+# On the queue manager, enable resource monitoring:
+ALTER QMGR MONQ(MEDIUM) MONCHL(MEDIUM)
+
+# Then restart the queue manager
+```
+
+**Note:** This is different from `STATMQI(ON)` and `STATQ(ON)` which enable statistics messages to admin queues. Both are independent features.
+
+Once enabled, the exporter will discover and collect:
+- CPU utilization metrics (`ibmmq_qmgr_cpu_*`)
+- Queue manager memory metrics (`ibmmq_qmgr_memory_*`)
+- Filesystem usage metrics (`ibmmq_qmgr_disk_*`)
+- Per-queue publication metrics from STATQ class
+
+To verify resource monitoring is working:
+1. Look for log messages: `"Found monitor class 'CPU'"`, `"Found monitor class 'DISK'"`
+2. Check metrics output for `ibmmq_qmgr_cpu_*` and related metrics
+3. If discovery fails, run the `ALTER QMGR` command above and restart the queue manager
+
 ## Metrics
 
 All metrics use the configured namespace (default: `ibmmq`).

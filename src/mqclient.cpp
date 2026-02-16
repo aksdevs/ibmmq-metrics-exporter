@@ -105,7 +105,16 @@ void MQClient::disconnect() {
 
     unsubscribe_all();
 
-    if (reply_open_) close_queue(reply_queue_);
+    // Delete the dynamic reply queue (EXPORTER.*) on disconnect
+    if (reply_open_) {
+        MQLONG cc = 0, rc = 0;
+        MQCLOSE(hconn_, &reply_queue_, MQCO_DELETE_PURGE, &cc, &rc);
+        if (cc == MQCC_FAILED)
+            spdlog::warn("Failed to delete reply queue '{}' (RC={})", reply_queue_name_, rc);
+        else
+            spdlog::info("Deleted reply queue '{}'", reply_queue_name_);
+        reply_queue_ = 0;
+    }
     if (stats_open_) close_queue(stats_queue_);
     if (acct_open_)  close_queue(acct_queue_);
 
@@ -698,10 +707,20 @@ std::optional<MQMessage> MQClient::subscribe_and_get(const std::string& topic_st
           static_cast<MQLONG>(buffer.size()),
           buffer.data(), &datalen, &cc, &rc);
 
-    // Close subscription handle first, then the managed destination queue
+    // Close subscription handle with MQCO_REMOVE_SUB to explicitly remove
+    // the non-durable subscription and trigger managed destination cleanup
     MQLONG cc2 = 0, rc2 = 0;
-    if (hsub != 0) MQCLOSE(hconn_, &hsub, MQCO_NONE, &cc2, &rc2);
-    if (hobj != 0) MQCLOSE(hconn_, &hobj, MQCO_NONE, &cc2, &rc2);
+    if (hsub != 0) {
+        MQCLOSE(hconn_, &hsub, MQCO_REMOVE_SUB, &cc2, &rc2);
+        if (cc2 == MQCC_FAILED)
+            spdlog::debug("Failed to close subscription handle for '{}' (RC={})", topic_string, rc2);
+    }
+    // Close the managed destination queue handle
+    if (hobj != 0) {
+        MQCLOSE(hconn_, &hobj, MQCO_NONE, &cc2, &rc2);
+        if (cc2 == MQCC_FAILED)
+            spdlog::debug("Failed to close managed destination for '{}' (RC={})", topic_string, rc2);
+    }
 
     if (cc == MQCC_FAILED || datalen <= 0) {
         spdlog::warn("No retained message on '{}' (RC={})", topic_string, rc);
@@ -721,13 +740,19 @@ std::optional<MQMessage> MQClient::subscribe_and_get(const std::string& topic_st
 void MQClient::unsubscribe_all() {
     for (auto& sub : subscriptions_) {
         MQLONG cc = 0, rc = 0;
+        // Remove the subscription explicitly to trigger managed destination cleanup
         if (sub.hsub != 0) {
-            MQCLOSE(hconn_, &sub.hsub, MQCO_NONE, &cc, &rc);
+            MQCLOSE(hconn_, &sub.hsub, MQCO_REMOVE_SUB, &cc, &rc);
+            if (cc == MQCC_FAILED)
+                spdlog::debug("Failed to remove subscription (RC={})", rc);
         }
         if (sub.hobj != 0) {
             MQCLOSE(hconn_, &sub.hobj, MQCO_NONE, &cc, &rc);
+            if (cc == MQCC_FAILED)
+                spdlog::debug("Failed to close managed destination (RC={})", rc);
         }
     }
+    spdlog::info("Removed {} subscriptions", subscriptions_.size());
     subscriptions_.clear();
 }
 

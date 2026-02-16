@@ -157,7 +157,13 @@ bool ResourceMonitor::discover_classes() {
 
     auto msg = client_.subscribe_and_get(classes_topic);
     if (!msg) {
-        spdlog::warn("No response from CLASSES metadata topic — is resource monitoring enabled on QM '{}'?", qmgr_name_);
+        spdlog::warn("No response from CLASSES metadata topic for QM '{}'", qmgr_name_);
+        spdlog::warn("Resource monitoring publications require MONQ and MONCHL to be enabled on the queue manager.");
+        spdlog::warn("Run the following commands on the queue manager to enable resource monitoring:");
+        spdlog::warn("  ALTER QMGR MONQ(MEDIUM) MONCHL(MEDIUM)");
+        spdlog::warn("  ALTER QMGR ACTVTRC(ON)");
+        spdlog::warn("Note: STATMQI/STATQ enable statistics messages to admin queues (a different feature).");
+        spdlog::warn("After changing MONQ/MONCHL, the queue manager may need to be restarted.");
         return false;
     }
 
@@ -165,7 +171,15 @@ bool ResourceMonitor::discover_classes() {
     spdlog::info("Received CLASSES metadata: {} bytes", data.size());
     if (data.size() < PCF_HEADER_SIZE) return false;
 
-    auto params = parse_pcf_params(data.data() + PCF_HEADER_SIZE, data.size() - PCF_HEADER_SIZE);
+    // Read actual MQCFH header size from StrucLength field (offset 4)
+    int32_t cfh_struc_length = 0;
+    std::memcpy(&cfh_struc_length, data.data() + 4, 4);
+    size_t params_offset = (cfh_struc_length > 0 && static_cast<size_t>(cfh_struc_length) <= data.size())
+                           ? static_cast<size_t>(cfh_struc_length) : PCF_HEADER_SIZE;
+
+    spdlog::debug("MQCFH StrucLength={}, using params_offset={}", cfh_struc_length, params_offset);
+
+    auto params = parse_pcf_params(data.data() + params_offset, data.size() - params_offset);
     spdlog::info("Parsed {} top-level PCF parameters from CLASSES metadata", params.size());
 
     // Each group represents a class
@@ -208,7 +222,12 @@ bool ResourceMonitor::discover_types(MonitorClass& cls) {
     const auto& data = msg->data;
     if (data.size() < PCF_HEADER_SIZE) return false;
 
-    auto params = parse_pcf_params(data.data() + PCF_HEADER_SIZE, data.size() - PCF_HEADER_SIZE);
+    int32_t cfh_struc_length = 0;
+    std::memcpy(&cfh_struc_length, data.data() + 4, 4);
+    size_t params_offset = (cfh_struc_length > 0 && static_cast<size_t>(cfh_struc_length) <= data.size())
+                           ? static_cast<size_t>(cfh_struc_length) : PCF_HEADER_SIZE;
+
+    auto params = parse_pcf_params(data.data() + params_offset, data.size() - params_offset);
 
     for (const auto& p : params) {
         if (p.type != PCF_GROUP) continue;
@@ -251,7 +270,12 @@ bool ResourceMonitor::discover_elements(MonitorClass& cls, MonitorType& mtype,
     const auto& data = msg->data;
     if (data.size() < PCF_HEADER_SIZE) return false;
 
-    auto params = parse_pcf_params(data.data() + PCF_HEADER_SIZE, data.size() - PCF_HEADER_SIZE);
+    int32_t cfh_struc_length = 0;
+    std::memcpy(&cfh_struc_length, data.data() + 4, 4);
+    size_t params_offset = (cfh_struc_length > 0 && static_cast<size_t>(cfh_struc_length) <= data.size())
+                           ? static_cast<size_t>(cfh_struc_length) : PCF_HEADER_SIZE;
+
+    auto params = parse_pcf_params(data.data() + params_offset, data.size() - params_offset);
 
     for (const auto& p : params) {
         // The ObjectTopic (data publication topic) is a top-level string param
@@ -313,9 +337,15 @@ std::vector<PublicationMetric> ResourceMonitor::process_publications() {
     for (const auto& msg : messages) {
         if (msg.data.size() < PCF_HEADER_SIZE) continue;
 
+        // Read actual MQCFH StrucLength
+        int32_t cfh_struc_length = 0;
+        std::memcpy(&cfh_struc_length, msg.data.data() + 4, 4);
+        size_t params_offset = (cfh_struc_length > 0 && static_cast<size_t>(cfh_struc_length) <= msg.data.size())
+                               ? static_cast<size_t>(cfh_struc_length) : PCF_HEADER_SIZE;
+
         auto params = parse_pcf_params(
-            msg.data.data() + PCF_HEADER_SIZE,
-            msg.data.size() - PCF_HEADER_SIZE);
+            msg.data.data() + params_offset,
+            msg.data.size() - params_offset);
 
         // Extract QM name and queue name from top-level params
         std::string queue_name;
