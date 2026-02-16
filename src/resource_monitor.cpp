@@ -171,16 +171,39 @@ bool ResourceMonitor::discover_classes() {
     spdlog::info("Received CLASSES metadata: {} bytes", data.size());
     if (data.size() < PCF_HEADER_SIZE) return false;
 
-    // Read actual MQCFH header size from StrucLength field (offset 4)
-    int32_t cfh_struc_length = 0;
+    // Dump MQCFH header fields for diagnostics
+    int32_t cfh_type = 0, cfh_struc_length = 0, cfh_version = 0, cfh_command = 0;
+    int32_t cfh_compcode = 0, cfh_reason = 0, cfh_paramcount = 0;
+    std::memcpy(&cfh_type, data.data(), 4);
     std::memcpy(&cfh_struc_length, data.data() + 4, 4);
-    size_t params_offset = (cfh_struc_length > 0 && static_cast<size_t>(cfh_struc_length) <= data.size())
-                           ? static_cast<size_t>(cfh_struc_length) : PCF_HEADER_SIZE;
+    std::memcpy(&cfh_version, data.data() + 8, 4);
+    std::memcpy(&cfh_command, data.data() + 12, 4);
+    std::memcpy(&cfh_compcode, data.data() + 24, 4);
+    std::memcpy(&cfh_reason, data.data() + 28, 4);
+    std::memcpy(&cfh_paramcount, data.data() + 32, 4);
 
-    spdlog::debug("MQCFH StrucLength={}, using params_offset={}", cfh_struc_length, params_offset);
+    spdlog::info("MQCFH: Type={}, StrucLength={}, Version={}, Command={}, CompCode={}, Reason={}, ParamCount={}",
+                 cfh_type, cfh_struc_length, cfh_version, cfh_command, cfh_compcode, cfh_reason, cfh_paramcount);
+
+    size_t params_offset = (cfh_struc_length >= 36 && static_cast<size_t>(cfh_struc_length) <= data.size())
+                           ? static_cast<size_t>(cfh_struc_length) : PCF_HEADER_SIZE;
 
     auto params = parse_pcf_params(data.data() + params_offset, data.size() - params_offset);
     spdlog::info("Parsed {} top-level PCF parameters from CLASSES metadata", params.size());
+
+    // Log all parameter types for diagnostics
+    for (size_t i = 0; i < params.size(); ++i) {
+        const auto& p = params[i];
+        if (p.type == PCF_STRING) {
+            spdlog::info("  Param[{}]: type={} (STRING), id={}, str='{}'", i, p.type, p.param_id, p.str_value);
+        } else if (p.type == PCF_INTEGER) {
+            spdlog::info("  Param[{}]: type={} (INT), id={}, val={}", i, p.type, p.param_id, p.int_value);
+        } else if (p.type == PCF_GROUP) {
+            spdlog::info("  Param[{}]: type={} (GROUP), id={}, inner_count={}", i, p.type, p.param_id, p.group_params.size());
+        } else {
+            spdlog::info("  Param[{}]: type={}, id={}", i, p.type, p.param_id);
+        }
+    }
 
     // Each group represents a class
     for (const auto& p : params) {
