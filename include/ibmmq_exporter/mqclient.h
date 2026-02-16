@@ -107,13 +107,21 @@ public:
     std::vector<std::string> discover_queues(const std::string& pattern);
 
     // Topic subscription ($SYS/MQ topics)
-    void subscribe_to_topic(const std::string& topic_string);
+    bool subscribe_to_topic(const std::string& topic_string);
     std::vector<MQMessage> receive_publications();
     void unsubscribe_all();
 
     // Subscribe to a topic, read one retained message, then close the subscription.
     // Used for metadata discovery from $SYS topics.
     std::optional<MQMessage> subscribe_and_get(const std::string& topic_string);
+
+    // Caller-managed subscriptions (for ResourceMonitor).
+    // create_subscription creates a non-durable subscription with its own
+    // EXPORTER.PUB.* queue and returns handles to the caller.
+    bool create_subscription(const std::string& topic_string,
+                             MQHOBJ& out_hobj, MQHOBJ& out_hsub);
+    std::vector<MQMessage> get_messages_from_handle(MQHOBJ hobj, int max_messages = 500);
+    void close_subscription(MQHOBJ& hsub, MQHOBJ& hobj);
 
     // Platform detection
     int32_t get_platform() const { return platform_; }

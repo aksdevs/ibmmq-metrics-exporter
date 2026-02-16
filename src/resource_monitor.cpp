@@ -28,6 +28,10 @@ namespace {
 ResourceMonitor::ResourceMonitor(MQClient& client, const std::string& qmgr_name)
     : client_(client), qmgr_name_(qmgr_name) {}
 
+ResourceMonitor::~ResourceMonitor() {
+    close();
+}
+
 std::vector<ResourceMonitor::PCFParam> ResourceMonitor::parse_pcf_params(
         const uint8_t* data, size_t len) {
     std::vector<PCFParam> params;
@@ -148,16 +152,18 @@ bool ResourceMonitor::discover() {
         }
     }
 
-    // Build element lookup map
+    // Build per-type element lookup maps (element_id is only unique within a type)
     for (const auto& cls : classes_) {
         for (const auto& t : cls.types) {
+            std::string key = cls.class_name + "/" + t.type_name;
+            auto& emap = type_elements_[key];
             for (const auto& e : t.elements) {
-                element_map_[e.element_id] = {cls.class_name, t.type_name, &e};
+                emap[e.element_id] = &e;
             }
         }
     }
 
-    spdlog::info("Built element lookup map with {} entries", element_map_.size());
+    spdlog::info("Built element lookup maps for {} types", type_elements_.size());
     return true;
 }
 
@@ -210,6 +216,15 @@ bool ResourceMonitor::discover_classes() {
             spdlog::info("  Param[{}]: type={} (INT), id={}, val={}", i, p.type, p.param_id, p.int_value);
         } else if (p.type == PCF_GROUP) {
             spdlog::info("  Param[{}]: type={} (GROUP), id={}, inner_count={}", i, p.type, p.param_id, p.group_params.size());
+            for (size_t j = 0; j < p.group_params.size(); ++j) {
+                const auto& gp = p.group_params[j];
+                if (gp.type == PCF_STRING)
+                    spdlog::info("    Group[{}].Inner[{}]: type=STRING, id={}, str='{}'", i, j, gp.param_id, gp.str_value);
+                else if (gp.type == PCF_INTEGER)
+                    spdlog::info("    Group[{}].Inner[{}]: type=INT, id={}, val={}", i, j, gp.param_id, gp.int_value);
+                else
+                    spdlog::info("    Group[{}].Inner[{}]: type={}, id={}", i, j, gp.type, gp.param_id);
+            }
         } else {
             spdlog::info("  Param[{}]: type={}, id={}", i, p.type, p.param_id);
         }
@@ -342,83 +357,130 @@ bool ResourceMonitor::discover_elements(MonitorClass& cls, MonitorType& mtype,
     return !mtype.elements.empty();
 }
 
-bool ResourceMonitor::create_subscriptions() {
+bool ResourceMonitor::create_subscriptions(const std::vector<std::string>& queues) {
     if (classes_.empty()) {
         spdlog::warn("No monitor classes discovered, skipping subscription creation");
         return false;
     }
 
-    // Subscribe to wildcard data topics for each class
+    // Subscribe to each type's exact object_topic (no wildcards — $SYS admin
+    // topics prohibit wildcard subscriptions, causing RC=2598).
+    int sub_count = 0;
     for (const auto& cls : classes_) {
-        std::string data_topic = "$SYS/MQ/INFO/QMGR/" + qmgr_name_ + "/Monitor/" + cls.class_name + "/#";
-        client_.subscribe_to_topic(data_topic);
-        spdlog::info("Subscribed to data topic: {}", data_topic);
+        for (const auto& type : cls.types) {
+            if (type.object_topic.empty()) continue;
+
+            auto pct_pos = type.object_topic.find("%s");
+            if (pct_pos == std::string::npos) {
+                // QM-level topic: single subscription to the exact path
+                MQHOBJ hobj = 0, hsub = 0;
+                if (client_.create_subscription(type.object_topic, hobj, hsub)) {
+                    data_subs_.push_back({cls.class_name, type.type_name, hobj, hsub});
+                    sub_count++;
+                    spdlog::info("Subscribed to {}/{} data topic: {}",
+                                 cls.class_name, type.type_name, type.object_topic);
+                }
+            } else {
+                // Per-object topic (contains %s): subscribe once per queue
+                int per_q = 0;
+                for (const auto& q : queues) {
+                    std::string topic = type.object_topic;
+                    topic.replace(topic.find("%s"), 2, q);
+
+                    MQHOBJ hobj = 0, hsub = 0;
+                    if (client_.create_subscription(topic, hobj, hsub)) {
+                        data_subs_.push_back({cls.class_name, type.type_name, hobj, hsub});
+                        sub_count++;
+                        per_q++;
+                    }
+                }
+                if (per_q > 0)
+                    spdlog::info("Subscribed to {}/{} for {} queues",
+                                 cls.class_name, type.type_name, per_q);
+                else if (queues.empty())
+                    spdlog::debug("Skipping per-queue topic {}/{} (no queues provided)",
+                                  cls.class_name, type.type_name);
+            }
+        }
     }
 
-    spdlog::info("Created {} data subscriptions for resource monitoring", classes_.size());
-    return true;
+    spdlog::info("Created {} data subscriptions for resource monitoring", sub_count);
+    return sub_count > 0;
 }
 
 std::vector<PublicationMetric> ResourceMonitor::process_publications() {
     std::vector<PublicationMetric> metrics;
 
-    auto messages = client_.receive_publications();
-    if (messages.empty()) return metrics;
+    // Read from each data subscription individually so we know the
+    // class/type context for correct element lookup.
+    for (const auto& sub : data_subs_) {
+        auto messages = client_.get_messages_from_handle(sub.hobj);
+        if (messages.empty()) continue;
 
-    spdlog::debug("Processing {} publication messages", messages.size());
+        std::string type_key = sub.class_name + "/" + sub.type_name;
+        auto type_it = type_elements_.find(type_key);
+        if (type_it == type_elements_.end()) continue;
 
-    for (const auto& msg : messages) {
-        if (msg.data.size() < PCF_HEADER_SIZE) continue;
+        const auto& emap = type_it->second;
 
-        // Read actual MQCFH StrucLength
-        int32_t cfh_struc_length = 0;
-        std::memcpy(&cfh_struc_length, msg.data.data() + 4, 4);
-        size_t params_offset = (cfh_struc_length > 0 && static_cast<size_t>(cfh_struc_length) <= msg.data.size())
-                               ? static_cast<size_t>(cfh_struc_length) : PCF_HEADER_SIZE;
+        for (const auto& msg : messages) {
+            if (msg.data.size() < PCF_HEADER_SIZE) continue;
 
-        auto params = parse_pcf_params(
-            msg.data.data() + params_offset,
-            msg.data.size() - params_offset);
+            int32_t cfh_struc_length = 0;
+            std::memcpy(&cfh_struc_length, msg.data.data() + 4, 4);
+            size_t params_offset = (cfh_struc_length > 0 &&
+                                    static_cast<size_t>(cfh_struc_length) <= msg.data.size())
+                                   ? static_cast<size_t>(cfh_struc_length) : PCF_HEADER_SIZE;
 
-        // Extract QM name and queue name from top-level params
-        std::string queue_name;
+            auto params = parse_pcf_params(
+                msg.data.data() + params_offset,
+                msg.data.size() - params_offset);
 
-        for (const auto& p : params) {
-            if (p.param_id == monitor_pcf::MQCA_Q_NAME)
-                queue_name = p.str_value;
-        }
+            // Extract queue name from per-queue publications
+            std::string queue_name;
+            for (const auto& p : params) {
+                if (p.param_id == monitor_pcf::MQCA_Q_NAME)
+                    queue_name = p.str_value;
+            }
 
-        // Process int and int64 parameters as metrics
-        for (const auto& p : params) {
-            if (p.type != PCF_INTEGER64 && p.type != PCF_INTEGER) continue;
+            // Map integer/int64 parameters to metrics using type-specific element lookup
+            for (const auto& p : params) {
+                if (p.type != PCF_INTEGER64 && p.type != PCF_INTEGER) continue;
 
-            auto it = element_map_.find(p.param_id);
-            if (it == element_map_.end()) continue;
+                auto it = emap.find(p.param_id);
+                if (it == emap.end()) continue;
 
-            const auto& lookup = it->second;
-            const auto* elem = lookup.element;
-            if (!elem) continue;
+                const auto* elem = it->second;
+                if (!elem) continue;
 
-            PublicationMetric pm;
-            pm.class_name = lookup.class_name;
-            pm.type_name = lookup.type_name;
-            pm.object_name = queue_name;
-            pm.metric_name = elem->metric_name;
-            pm.value = normalize_value(p.int64_value, elem->datatype);
-            pm.is_delta = (elem->datatype == monitor_datatype::DELTA);
-            metrics.push_back(std::move(pm));
+                PublicationMetric pm;
+                pm.class_name = sub.class_name;
+                pm.type_name = sub.type_name;
+                pm.object_name = queue_name;
+                pm.metric_name = elem->metric_name;
+                pm.value = normalize_value(p.int64_value, elem->datatype);
+                pm.is_delta = (elem->datatype == monitor_datatype::DELTA);
+                metrics.push_back(std::move(pm));
+            }
         }
     }
 
     if (!metrics.empty())
-        spdlog::debug("Processed {} publication metrics", metrics.size());
+        spdlog::debug("Processed {} publication metrics from {} subscriptions",
+                       metrics.size(), data_subs_.size());
 
     return metrics;
 }
 
 void ResourceMonitor::close() {
+    if (!data_subs_.empty()) {
+        spdlog::info("Closing resource monitor: {} data subscriptions", data_subs_.size());
+        for (auto& sub : data_subs_) {
+            client_.close_subscription(sub.hsub, sub.hobj);
+        }
+    }
     data_subs_.clear();
-    element_map_.clear();
+    type_elements_.clear();
     classes_.clear();
 }
 

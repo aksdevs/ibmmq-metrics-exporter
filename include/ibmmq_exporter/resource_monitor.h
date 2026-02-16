@@ -86,7 +86,7 @@ namespace monitor_pcf {
 class ResourceMonitor {
 public:
     ResourceMonitor(MQClient& client, const std::string& qmgr_name);
-    ~ResourceMonitor() = default;
+    ~ResourceMonitor();
 
     ResourceMonitor(const ResourceMonitor&) = delete;
     ResourceMonitor& operator=(const ResourceMonitor&) = delete;
@@ -94,8 +94,9 @@ public:
     // Phase 1: Discover metadata from $SYS topics (one-time at startup)
     bool discover();
 
-    // Phase 2: Create long-lived wildcard subscriptions for data
-    bool create_subscriptions();
+    // Phase 2: Create subscriptions to exact per-type data topics.
+    // For per-queue classes (STATQ, STATAPP) pass discovered queue names.
+    bool create_subscriptions(const std::vector<std::string>& queues = {});
 
     // Phase 3: Process pending publication messages (each collection cycle)
     std::vector<PublicationMetric> process_publications();
@@ -139,17 +140,14 @@ private:
 
     std::vector<MonitorClass> classes_;
 
-    // Lookup: element_id -> (class_name, type_name, MonitorElement*)
-    struct ElementLookup {
-        std::string class_name;
-        std::string type_name;
-        const MonitorElement* element{nullptr};
-    };
-    std::map<int32_t, ElementLookup> element_map_;
+    // Per-type element lookup: key = "class_name/type_name"
+    // value = map<element_id, MonitorElement pointer>
+    std::map<std::string, std::map<int32_t, const MonitorElement*>> type_elements_;
 
-    // Data subscription handles (managed by MQClient)
+    // Data subscription handles (managed by ResourceMonitor, not MQClient)
     struct DataSub {
         std::string class_name;
+        std::string type_name;
         MQHOBJ hobj{0};
         MQHOBJ hsub{0};
     };
