@@ -37,6 +37,87 @@ namespace ibmmq_exporter {
 #undef MQIA_MAX_Q_DEPTH
 #endif
 
+// Additional macros from cmqc.h / cmqcfc.h that conflict with pcf:: constexpr names.
+// Comprehensive list to handle any include order.
+#ifdef MQCA_Q_NAME
+#undef MQCA_Q_NAME
+#endif
+#ifdef MQCA_Q_MGR_NAME
+#undef MQCA_Q_MGR_NAME
+#endif
+#ifdef MQIACH_MSGS
+#undef MQIACH_MSGS
+#endif
+#ifdef MQIACH_BATCHES
+#undef MQIACH_BATCHES
+#endif
+#ifdef MQCACH_CONNECTION_NAME
+#undef MQCACH_CONNECTION_NAME
+#endif
+#ifdef MQIAMO_OPENS
+#undef MQIAMO_OPENS
+#endif
+#ifdef MQIAMO_CLOSES
+#undef MQIAMO_CLOSES
+#endif
+#ifdef MQIAMO_PUTS
+#undef MQIAMO_PUTS
+#endif
+#ifdef MQIAMO_GETS
+#undef MQIAMO_GETS
+#endif
+#ifdef MQIAMO_COMMITS
+#undef MQIAMO_COMMITS
+#endif
+#ifdef MQIAMO_BACKOUTS
+#undef MQIAMO_BACKOUTS
+#endif
+#ifdef MQIAMO_BROWSES
+#undef MQIAMO_BROWSES
+#endif
+#ifdef MQIAMO_INQS
+#undef MQIAMO_INQS
+#endif
+#ifdef MQIAMO_SETS
+#undef MQIAMO_SETS
+#endif
+#ifdef MQIAMO_FULL_BATCHES
+#undef MQIAMO_FULL_BATCHES
+#endif
+#ifdef MQIAMO_INCOMPLETE_BATCHES
+#undef MQIAMO_INCOMPLETE_BATCHES
+#endif
+#ifdef MQIACF_PROCESS_ID
+#undef MQIACF_PROCESS_ID
+#endif
+#ifdef MQCACF_APPL_NAME
+#undef MQCACF_APPL_NAME
+#endif
+#ifdef MQCACF_APPL_TAG
+#undef MQCACF_APPL_TAG
+#endif
+#ifdef MQCACF_USER_IDENTIFIER
+#undef MQCACF_USER_IDENTIFIER
+#endif
+#ifdef MQIAMO_MSGS_SENT
+#undef MQIAMO_MSGS_SENT
+#endif
+#ifdef MQIAMO_MSGS_RCVD
+#undef MQIAMO_MSGS_RCVD
+#endif
+#ifdef MQIAMO_BYTES_SENT
+#undef MQIAMO_BYTES_SENT
+#endif
+#ifdef MQIAMO_MSG_BYTES_RCVD
+#undef MQIAMO_MSG_BYTES_RCVD
+#endif
+#ifdef MQIACH_CHANNEL_STATUS
+#undef MQIACH_CHANNEL_STATUS
+#endif
+#ifdef MQIACH_CHANNEL_TYPE
+#undef MQIACH_CHANNEL_TYPE
+#endif
+
 // PCF constants
 namespace pcf {
     // Format types
@@ -65,7 +146,7 @@ namespace pcf {
 
     // Parameter IDs
     constexpr int32_t MQCA_Q_NAME            = 2016;
-    constexpr int32_t MQCA_Q_MGR_NAME        = 2002;
+    constexpr int32_t MQCA_Q_MGR_NAME        = 2015;
     constexpr int32_t MQCA_CHANNEL_NAME      = 3501;
     constexpr int32_t MQCA_CONNECTION_NAME   = 3502;
     constexpr int32_t MQCA_APPL_NAME         = 2024;
@@ -77,9 +158,9 @@ namespace pcf {
     constexpr int32_t MQIA_MSG_ENQ_COUNT     = 37;
 
     // Channel statistics
-    constexpr int32_t MQIACH_MSGS    = 1501;
-    constexpr int32_t MQIACH_BYTES   = 1502;
-    constexpr int32_t MQIACH_BATCHES = 1503;
+    constexpr int32_t MQIACH_MSGS    = 1534;
+    constexpr int32_t MQIACH_BYTES   = 1535;
+    constexpr int32_t MQIACH_BATCHES = 1537;
 
     // MQI statistics (Windows values in 700+ range)
     constexpr int32_t MQIAMO_OPENS                = 733;
@@ -88,13 +169,12 @@ namespace pcf {
     constexpr int32_t MQIAMO_GETS                 = 722;
     constexpr int32_t MQIAMO_COMMITS              = 710;
     constexpr int32_t MQIAMO_BACKOUTS             = 704;
-    constexpr int32_t MQIAMO_BROWSES              = 725;
+    constexpr int32_t MQIAMO_BROWSES              = 705;
     constexpr int32_t MQIAMO_INQS                 = 727;
-    constexpr int32_t MQIAMO_SETS                 = 731;
+    constexpr int32_t MQIAMO_SETS                 = 744;
     constexpr int32_t MQIAMO_DISC_CLOSE_TIMEOUT   = 765;
     constexpr int32_t MQIAMO_DISC_RESET_TIMEOUT   = 766;
     constexpr int32_t MQIAMO_FAILS                = 767;
-    constexpr int32_t MQIAMO_INCOMPLETE_BATCH     = 768;
     constexpr int32_t MQIAMO_INCOMPLETE_MSG       = 769;
     constexpr int32_t MQIAMO_WAIT_INTERVAL        = 770;
     constexpr int32_t MQIAMO_SYNCPOINT_HEURISTIC  = 771;
@@ -114,27 +194,24 @@ namespace pcf {
     constexpr int32_t MQIAMO_CONN_TIME_MAX        = 787;
     constexpr int32_t MQIAMO_STAMP_ENABLED        = 788;
 
-    constexpr int32_t MQIACF_MSGS_RECEIVED      = 744;
-    constexpr int32_t MQIACF_MSGS_SENT          = 751;
-    constexpr int32_t MQIACF_BYTES_RECEIVED     = 752;
-    constexpr int32_t MQIACF_BYTES_SENT         = 753;
-    constexpr int32_t MQIACF_CHANNEL_STATUS     = 754;
-    constexpr int32_t MQIACF_CHANNEL_TYPE       = 755;
-    constexpr int32_t MQIACF_CHANNEL_ERRORS     = 757;
-    constexpr int32_t MQIACF_CHANNEL_DISC_COUNT = 758;
-    constexpr int32_t MQIACF_CHANNEL_EXITNAME   = 760;
+    // MQI/channel activity monitoring (real IBM MQ 9.x values)
+    constexpr int32_t MQIAMO_MSGS_RCVD          = 817;
+    constexpr int32_t MQIAMO_MSGS_SENT          = 790;
+    constexpr int32_t MQIAMO_MSG_BYTES_RCVD     = 818;
+    constexpr int32_t MQIAMO_BYTES_SENT         = 791;
+    constexpr int32_t MQIACH_CHANNEL_STATUS     = 1527;
+    constexpr int32_t MQIACH_CHANNEL_TYPE       = 1511;
 
-    constexpr int32_t MQIAMO_BACKOUT_COUNT   = 745;
-    constexpr int32_t MQIAMO_COMMITS_COUNT   = 747;
-    constexpr int32_t MQIAMO_ROLLBACK_COUNT  = 748;
-    constexpr int32_t MQIAMO_FULL_BATCHES    = 749;
-    constexpr int32_t MQIAMO_PARTIAL_BATCHES = 714;
+    // Accounting counters — no direct real MQIAMO_* equivalents for these
+    // aggregated accounting fields.  Use the base MQI constants instead.
+    constexpr int32_t MQIAMO_FULL_BATCHES    = 720;
+    constexpr int32_t MQIAMO_INCOMPLETE_BATCHES = 726;
 
     constexpr int32_t MQCACF_APPL_NAME       = 3024;
     constexpr int32_t MQCACF_APPL_TAG        = 3058;
     constexpr int32_t MQCACF_USER_IDENTIFIER = 3025;
     constexpr int32_t MQCACH_CONNECTION_NAME  = 3506;
-    constexpr int32_t MQIACF_PROCESS_ID      = 1047;
+    constexpr int32_t MQIACF_PROCESS_ID      = 1024;
     constexpr int32_t MQCACF_COMMAND_TIME    = 3603;
 } // namespace pcf
 

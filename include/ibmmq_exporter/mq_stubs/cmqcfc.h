@@ -40,20 +40,20 @@
 #define MQCFC_LAST               1
 #define MQCFC_NOT_LAST           0
 
-/* Channel status parameter IDs */
+/* Channel status parameter IDs (values from real IBM MQ 9.x headers) */
 #define MQCACH_CHANNEL_NAME         3501
 #define MQCACH_CONNECTION_NAME      3506
-#define MQCACH_REMOTE_Q_MGR_NAME    3507
+#define MQCACH_MCA_NAME             3507
 #define MQCACH_SSL_CIPHER_SPEC      3544
-#define MQCACH_JOB_NAME             3508
+#define MQCACH_MCA_JOB_NAME         3530
 #define MQIACH_CHANNEL_STATUS       1527
-#define MQIACH_CHANNEL_TYPE         1521
-#define MQIACH_MSGS                 1501
-#define MQIACH_BYTES_SENT           1502
-#define MQIACH_BYTES_RECEIVED       1503
-#define MQIACH_BATCHES              1504
-#define MQIACH_CHANNEL_SUBSTATE     1601
-#define MQIACH_CHANNEL_INSTANCE_TYPE 1522
+#define MQIACH_CHANNEL_TYPE         1511
+#define MQIACH_MSGS                 1534
+#define MQIACH_BYTES_SENT           1535
+#define MQIACH_BYTES_RECEIVED       1536
+#define MQIACH_BATCHES              1537
+#define MQIACH_CHANNEL_SUBSTATE     1609
+#define MQIACH_CHANNEL_INSTANCE_TYPE 1523
 
 /* Channel type values */
 #define MQCHT_SENDER     1
@@ -84,9 +84,9 @@
 /* Topic status parameter IDs */
 #define MQCA_TOPIC_STRING       2094
 #define MQCA_TOPIC_NAME         2092
-#define MQIA_TOPIC_TYPE         65
-#define MQIA_PUB_COUNT          88
-#define MQIA_SUB_COUNT          89
+#define MQIA_TOPIC_TYPE         208
+#define MQIA_PUB_COUNT          215
+#define MQIA_SUB_COUNT          204
 #define MQIACF_TOPIC_STATUS_TYPE 1185
 
 /* Topic status type values */
@@ -95,44 +95,43 @@
 #define MQIACF_TOPIC_STATUS     0
 
 /* Subscription status parameter IDs */
-#define MQCA_SUB_NAME           2095
+#define MQCACF_SUB_NAME         3152
 #define MQBACF_SUB_ID           7016
-#define MQIA_SUB_TYPE           71
-#define MQIA_DURABLE_SUB        73
+#define MQIACF_SUB_TYPE         1289
+#define MQIA_DURABLE_SUB        175
 #define MQIACF_SUB_STATUS_TYPE  1186
-#define MQIACF_DESTINATION      1187
+#define MQCACF_DESTINATION      3154
 
 /* QM status parameter IDs */
-#define MQCA_Q_MGR_NAME         2002
-#define MQCA_Q_MGR_DESC         2003
-#define MQIA_Q_MGR_STATUS       119
-#define MQIA_CHINIT_STATUS      120
-#define MQIA_CONNS              121
-#define MQIA_CMD_SERVER_STATUS  122
-#define MQCACF_Q_MGR_START_DATE 3160
-#define MQCACF_Q_MGR_START_TIME 3161
+#define MQCA_Q_MGR_NAME         2015
+#define MQCA_Q_MGR_DESC         2014
+#define MQIACF_Q_MGR_STATUS     1149
+#define MQIACF_CHINIT_STATUS    1232
+#define MQIACF_CONNECTION_COUNT 1229
+#define MQIACF_CMD_SERVER_STATUS 1233
+#define MQCACF_Q_MGR_START_DATE 3175
+#define MQCACF_Q_MGR_START_TIME 3176
 
 /* Cluster QM parameter IDs */
-#define MQCA_CLUSTER_NAME       2004
+#define MQCA_CLUSTER_NAME       2029
 #define MQIA_QM_TYPE            125
 #define MQIACF_CLUSTER_Q_MGR_STATUS 1127
 
 /* z/OS usage parameter IDs */
-#define MQIACF_USAGE_TYPE       1125
-#define MQIACF_USAGE_BP         1
-#define MQIACF_USAGE_PS         2
-#define MQIA_BUFFER_POOL        22
-#define MQIA_PAGESET_ID         62
-#define MQIACF_USAGE_TOTAL_PAGES     1126
-#define MQIACF_USAGE_UNUSED_PAGES    1128
-#define MQIACF_USAGE_PERSIST_PAGES   1129
-#define MQIACF_USAGE_NONPERSIST_PAGES 1130
-#define MQIACF_USAGE_RESTART_PAGES   1131
-#define MQIACF_USAGE_EXPAND_COUNT    1132
-#define MQIACF_USAGE_LOCATION        1133
-#define MQIACF_USAGE_PAGE_CLASS      1134
-#define MQIACF_USAGE_FREE_BUFF       1135
-#define MQIACF_USAGE_TOTAL_BUFF      1136
+#define MQIACF_USAGE_TYPE            1157
+#define MQIACF_USAGE_BP              1
+#define MQIACF_USAGE_PS              2
+#define MQIACF_BUFFER_POOL_ID        1158
+#define MQIA_PAGESET_ID              62
+#define MQIACF_USAGE_TOTAL_PAGES     1159
+#define MQIACF_USAGE_UNUSED_PAGES    1160
+#define MQIACF_USAGE_PERSIST_PAGES   1161
+#define MQIACF_USAGE_NONPERSIST_PAGES 1162
+#define MQIACF_USAGE_RESTART_EXTENTS 1163
+#define MQIACF_USAGE_EXPAND_COUNT    1164
+#define MQIACF_USAGE_BUFFER_POOL     1170
+#define MQIACF_USAGE_FREE_BUFF       1330
+#define MQIACF_USAGE_TOTAL_BUFFERS   1166
 
 /* Queue attributes for INQUIRE_Q */
 #define MQCA_Q_NAME             2016

@@ -6,7 +6,10 @@
 #include <string>
 #include <vector>
 
+extern "C" {
 #include <cmqc.h>
+#include <cmqxc.h>
+}
 
 #include "ibmmq_exporter/config.h"
 #include "ibmmq_exporter/pcf_inquiry.h"
@@ -121,10 +124,10 @@ private:
     bool     acct_open_{false};
     int32_t  platform_{0};
 
-    // Subscription handles
+    // Subscription handles (real MQ uses MQHOBJ for both)
     struct SubHandle {
         MQHOBJ hobj{0};
-        MQHSUB hsub{0};
+        MQHOBJ hsub{0};
     };
     std::vector<SubHandle> subscriptions_;
 

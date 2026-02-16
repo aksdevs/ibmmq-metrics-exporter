@@ -23,7 +23,7 @@ typedef MQCHAR   MQCHAR256[256];
 typedef MQCHAR   MQCHAR264[264];
 typedef MQLONG   MQHCONN;
 typedef MQLONG   MQHOBJ;
-typedef MQLONG   MQHSUB;
+typedef MQLONG   MQHSUB;  /* Convenience alias; real MQ uses MQHOBJ for subscriptions */
 typedef uint8_t  MQBYTE;
 typedef MQBYTE   MQBYTE24[24];
 typedef MQBYTE   MQBYTE32[32];
@@ -128,7 +128,7 @@ typedef struct tagMQCHARV {
     MQLONG  VSLength;
     MQLONG  VSCCSID;
 } MQCHARV;
-#define MQCHARV_DEFAULT { nullptr, 0, 0, 0, 0 }
+#define MQCHARV_DEFAULT nullptr, 0, 0, 0, 0
 
 /* ----- Structure definitions ----- */
 
@@ -144,7 +144,7 @@ typedef struct tagMQOD {
     MQCHAR48  DynamicQName;
     MQCHAR12  AlternateUserId;
 } MQOD;
-#define MQOD_DEFAULT { {'O','D',' ',' '}, MQOD_VERSION_1, MQOT_Q, "", "", "AMQ.*", "" }
+#define MQOD_DEFAULT {'O','D',' ',' '}, MQOD_VERSION_1, MQOT_Q, {""}, {""}, {"AMQ.*"}, {""}
 
 /* MQMD - Message Descriptor */
 #define MQMD_VERSION_1 1
@@ -175,7 +175,7 @@ typedef struct tagMQMD {
     MQCHAR8   PutTime;
     MQCHAR4   ApplOriginData;
 } MQMD;
-#define MQMD_DEFAULT { {'M','D',' ',' '}, MQMD_VERSION_1, 0, MQMT_DATAGRAM, -1, 0, 0, 0, "", 0, 0, {0}, {0}, 0, "", "", "", {0}, "", 0, "", "", "", "" }
+#define MQMD_DEFAULT {'M','D',' ',' '}, MQMD_VERSION_1, 0, MQMT_DATAGRAM, -1, 0, 0, 0, {""}, 0, 0, {0}, {0}, 0, {""}, {""}, {""}, {0}, {""}, 0, {""}, {""}, {""}, {""}
 
 /* MQGMO - Get Message Options */
 typedef struct tagMQGMO {
@@ -187,7 +187,7 @@ typedef struct tagMQGMO {
     MQLONG    Signal2;
     MQCHAR48  ResolvedQName;
 } MQGMO;
-#define MQGMO_DEFAULT { {'G','M','O',' '}, MQGMO_VERSION_1, MQGMO_NO_WAIT, 0, 0, 0, "" }
+#define MQGMO_DEFAULT {'G','M','O',' '}, MQGMO_VERSION_1, MQGMO_NO_WAIT, 0, 0, 0, {""}
 
 /* MQPMO - Put Message Options */
 typedef struct tagMQPMO {
@@ -202,7 +202,7 @@ typedef struct tagMQPMO {
     MQCHAR48  ResolvedQName;
     MQCHAR48  ResolvedQMgrName;
 } MQPMO;
-#define MQPMO_DEFAULT { {'P','M','O',' '}, MQPMO_VERSION_1, MQPMO_NONE, -1, 0, 0, 0, 0, "", "" }
+#define MQPMO_DEFAULT {'P','M','O',' '}, MQPMO_VERSION_1, MQPMO_NONE, -1, 0, 0, 0, 0, {""}, {""}
 
 /* MQCNO - Connect Options */
 typedef struct tagMQCNO {
@@ -213,15 +213,7 @@ typedef struct tagMQCNO {
     void*     ClientConnPtr;
     void*     SecurityParmsPtr;
 } MQCNO;
-#define MQCNO_DEFAULT { {'C','N','O',' '}, MQCNO_VERSION_2, MQCNO_CLIENT_BINDING, 0, nullptr, nullptr }
-
-/* MQCD - Channel Definition */
-typedef struct tagMQCD {
-    MQCHAR20  ChannelName;
-    MQCHAR264 ConnectionName;
-    MQCHAR32  SSLCipherSpec;
-} MQCD;
-#define MQCD_CLIENT_CONN_DEFAULT { "", "", "" }
+#define MQCNO_DEFAULT {'C','N','O',' '}, MQCNO_VERSION_2, MQCNO_CLIENT_BINDING, 0, nullptr, nullptr
 
 /* MQCSP - Security Parameters */
 typedef struct tagMQCSP {
@@ -235,7 +227,7 @@ typedef struct tagMQCSP {
     MQLONG    CSPPasswordOffset;
     MQLONG    CSPPasswordLength;
 } MQCSP;
-#define MQCSP_DEFAULT { {'C','S','P',' '}, 1, MQCSP_AUTH_NONE, nullptr, 0, 0, nullptr, 0, 0 }
+#define MQCSP_DEFAULT {'C','S','P',' '}, 1, MQCSP_AUTH_NONE, nullptr, 0, 0, nullptr, 0, 0
 
 /* MQSD - Subscription Descriptor */
 #define MQSD_VERSION_1 1
@@ -249,7 +241,7 @@ typedef struct tagMQSD {
     MQCHAR48  ObjectName;
     MQLONG    SubLevel;
 } MQSD;
-#define MQSD_DEFAULT { {'S','D',' ',' '}, MQSD_VERSION_1, 0, MQCHARV_DEFAULT, MQCHARV_DEFAULT, -1, "", 0 }
+#define MQSD_DEFAULT {'S','D',' ',' '}, MQSD_VERSION_1, 0, {MQCHARV_DEFAULT}, {MQCHARV_DEFAULT}, -1, {""}, 0
 
 /* ----- Stub API functions ----- */
 #ifdef IBMMQ_STUB_MODE
@@ -286,7 +278,7 @@ inline void MQINQ(MQHCONN, MQHOBJ, MQLONG /*selectorCount*/, MQLONG* selectors,
     for (MQLONG i = 0; i < intAttrCount; ++i) intAttrs[i] = 0;
     *cc = MQCC_OK; *rc = MQRC_NONE;
 }
-inline void MQSUB(MQHCONN, MQSD*, MQHOBJ* hobj, MQHSUB* hsub, MQLONG* cc, MQLONG* rc) {
+inline void MQSUB(MQHCONN, MQSD*, MQHOBJ* hobj, MQHOBJ* hsub, MQLONG* cc, MQLONG* rc) {
     *hobj = 2; *hsub = 1; *cc = MQCC_OK; *rc = MQRC_NONE;
 }
 
@@ -302,7 +294,7 @@ void MQCLOSE(MQHCONN, MQHOBJ*, MQLONG, MQLONG*, MQLONG*);
 void MQGET(MQHCONN, MQHOBJ, MQMD*, MQGMO*, MQLONG, void*, MQLONG*, MQLONG*, MQLONG*);
 void MQPUT(MQHCONN, MQHOBJ, MQMD*, MQPMO*, MQLONG, void*, MQLONG*, MQLONG*);
 void MQINQ(MQHCONN, MQHOBJ, MQLONG, MQLONG*, MQLONG, MQLONG*, MQLONG, char*, MQLONG*, MQLONG*);
-void MQSUB(MQHCONN, MQSD*, MQHOBJ*, MQHSUB*, MQLONG*, MQLONG*);
+void MQSUB(MQHCONN, MQSD*, MQHOBJ*, MQHOBJ*, MQLONG*, MQLONG*);
 #ifdef __cplusplus
 }
 #endif

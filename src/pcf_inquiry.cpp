@@ -135,7 +135,7 @@ std::vector<uint8_t> PCFInquiry::build_inquire_topic_status_cmd(const std::strin
 
 std::vector<uint8_t> PCFInquiry::build_inquire_sub_status_cmd(const std::string& sub_pattern) {
     auto buf = build_pcf_cmd(92, 1); // MQCMD_INQUIRE_SUB_STATUS
-    append_string_param(buf, 2095, sub_pattern); // MQCA_SUB_NAME
+    append_string_param(buf, 3152, sub_pattern); // MQCACF_SUB_NAME
     spdlog::debug("Built INQUIRE_SUB_STATUS for {}, size={}", sub_pattern, buf.size());
     return buf;
 }
@@ -148,14 +148,14 @@ std::vector<uint8_t> PCFInquiry::build_inquire_qmgr_status_cmd() {
 
 std::vector<uint8_t> PCFInquiry::build_inquire_cluster_qmgr_cmd() {
     auto buf = build_pcf_cmd(71, 1); // MQCMD_INQUIRE_CLUSTER_Q_MGR
-    append_string_param(buf, 2004, "*"); // MQCA_CLUSTER_NAME = wildcard
+    append_string_param(buf, 2029, "*"); // MQCA_CLUSTER_NAME = wildcard
     spdlog::debug("Built INQUIRE_CLUSTER_Q_MGR, size={}", buf.size());
     return buf;
 }
 
 std::vector<uint8_t> PCFInquiry::build_inquire_usage_cmd(int32_t usage_type) {
     auto buf = build_pcf_cmd(84, 1); // MQCMD_INQUIRE_USAGE
-    append_integer_param(buf, 1125, usage_type); // MQIACF_USAGE_TYPE
+    append_integer_param(buf, 1157, usage_type); // MQIACF_USAGE_TYPE
     spdlog::debug("Built INQUIRE_USAGE type={}, size={}", usage_type, buf.size());
     return buf;
 }
@@ -253,27 +253,27 @@ std::vector<ChannelStatusDetails> PCFInquiry::parse_channel_status_response(
                 if (ptype == 4) { // MQCFT_STRING
                     auto val = read_pcf_string(pdata, plen);
                     switch (pid) {
-                    case 3501: ch.channel_name = val; break;
-                    case 3506: ch.connection_name = val; break;
-                    case 3507: ch.remote_qmgr = val; break;
-                    case 3508: ch.job_name = val; break;
-                    case 3544: ch.ssl_cipher = val; break;
+                    case 3501: ch.channel_name = val; break;    // MQCACH_CHANNEL_NAME
+                    case 3506: ch.connection_name = val; break; // MQCACH_CONNECTION_NAME
+                    case 3507: ch.remote_qmgr = val; break;    // MQCACH_MCA_NAME (remote partner)
+                    case 3530: ch.job_name = val; break;        // MQCACH_MCA_JOB_NAME
+                    case 3544: ch.ssl_cipher = val; break;      // MQCACH_SSL_CIPHER_SPEC
                     }
                 } else if (ptype == 3) { // MQCFT_INTEGER
                     int32_t val = read_pcf_int32(pdata, plen);
                     switch (pid) {
-                    case 1527: ch.status = val; break;
-                    case 1521: ch.channel_type = val; break;
-                    case 1501: ch.msgs = val; break;
-                    case 1504: ch.batches = val; break;
-                    case 1601: ch.substate = val; break;
-                    case 1522: ch.instance_type = val; break;
+                    case 1527: ch.status = val; break;          // MQIACH_CHANNEL_STATUS
+                    case 1511: ch.channel_type = val; break;    // MQIACH_CHANNEL_TYPE
+                    case 1534: ch.msgs = val; break;            // MQIACH_MSGS
+                    case 1537: ch.batches = val; break;         // MQIACH_BATCHES
+                    case 1609: ch.substate = val; break;        // MQIACH_CHANNEL_SUBSTATE
+                    case 1523: ch.instance_type = val; break;   // MQIACH_CHANNEL_INSTANCE_TYPE
                     }
                 } else if (ptype == 23) { // MQCFT_INTEGER64
                     int64_t val = read_pcf_int64(pdata, plen);
                     switch (pid) {
-                    case 1502: ch.bytes_sent = val; break;
-                    case 1503: ch.bytes_received = val; break;
+                    case 1535: ch.bytes_sent = val; break;      // MQIACH_BYTES_SENT
+                    case 1536: ch.bytes_received = val; break;  // MQIACH_BYTES_RECEIVED
                     }
                 }
             });
@@ -302,9 +302,9 @@ std::vector<TopicStatusDetails> PCFInquiry::parse_topic_status_response(
                 } else if (ptype == 3) {
                     int32_t val = read_pcf_int32(pdata, plen);
                     switch (pid) {
-                    case 65: topic.topic_type = val; break;
-                    case 88: topic.pub_count = val; break;
-                    case 89: topic.sub_count = val; break;
+                    case 208: topic.topic_type = val; break;  // MQIA_TOPIC_TYPE
+                    case 215: topic.pub_count = val; break;   // MQIA_PUB_COUNT
+                    case 204: topic.sub_count = val; break;   // MQIA_SUB_COUNT
                     }
                 }
             });
@@ -328,16 +328,16 @@ std::vector<SubStatusDetails> PCFInquiry::parse_sub_status_response(
                 if (ptype == 4) {
                     auto val = read_pcf_string(pdata, plen);
                     switch (pid) {
-                    case 2095: sub.sub_name = val; break;
-                    case 2094: sub.topic_string = val; break;
-                    case 1187: sub.destination = val; break;
-                    case 7016: sub.sub_id = val; break;
+                    case 3152: sub.sub_name = val; break;      // MQCACF_SUB_NAME
+                    case 2094: sub.topic_string = val; break;  // MQCA_TOPIC_STRING
+                    case 3154: sub.destination = val; break;   // MQCACF_DESTINATION
+                    case 7016: sub.sub_id = val; break;        // MQBACF_SUB_ID
                     }
                 } else if (ptype == 3) {
                     int32_t val = read_pcf_int32(pdata, plen);
                     switch (pid) {
-                    case 71: sub.sub_type = val; break;
-                    case 73: sub.durable = val; break;
+                    case 1289: sub.sub_type = val; break;      // MQIACF_SUB_TYPE
+                    case 175:  sub.durable = val; break;       // MQIA_DURABLE_SUB
                     }
                 }
             });
@@ -360,18 +360,18 @@ std::vector<QMgrStatusDetails> PCFInquiry::parse_qmgr_status_response(
                 if (ptype == 4) {
                     auto val = read_pcf_string(pdata, plen);
                     switch (pid) {
-                    case 2002: qm.qmgr_name = val; break;
-                    case 2003: qm.description = val; break;
-                    case 3160: qm.start_date = val; break;
-                    case 3161: qm.start_time = val; break;
+                    case 2015: qm.qmgr_name = val; break;     // MQCA_Q_MGR_NAME
+                    case 2014: qm.description = val; break;    // MQCA_Q_MGR_DESC
+                    case 3175: qm.start_date = val; break;     // MQCACF_Q_MGR_START_DATE
+                    case 3176: qm.start_time = val; break;     // MQCACF_Q_MGR_START_TIME
                     }
                 } else if (ptype == 3) {
                     int32_t val = read_pcf_int32(pdata, plen);
                     switch (pid) {
-                    case 119: qm.status = val; break;
-                    case 120: qm.chinit_status = val; break;
-                    case 121: qm.connection_count = val; break;
-                    case 122: qm.cmd_server_status = val; break;
+                    case 1149: qm.status = val; break;             // MQIACF_Q_MGR_STATUS
+                    case 1232: qm.chinit_status = val; break;      // MQIACF_CHINIT_STATUS
+                    case 1229: qm.connection_count = val; break;   // MQIACF_CONNECTION_COUNT
+                    case 1233: qm.cmd_server_status = val; break;  // MQIACF_CMD_SERVER_STATUS
                     }
                 }
             });
@@ -394,8 +394,8 @@ std::vector<ClusterQMgrDetails> PCFInquiry::parse_cluster_qmgr_response(
                 if (ptype == 4) {
                     auto val = read_pcf_string(pdata, plen);
                     switch (pid) {
-                    case 2004: cl.cluster_name = val; break;
-                    case 2002: cl.qmgr_name = val; break;
+                    case 2029: cl.cluster_name = val; break;   // MQCA_CLUSTER_NAME
+                    case 2015: cl.qmgr_name = val; break;     // MQCA_Q_MGR_NAME
                     }
                 } else if (ptype == 3) {
                     int32_t val = read_pcf_int32(pdata, plen);
@@ -424,11 +424,10 @@ std::vector<UsageBPDetails> PCFInquiry::parse_usage_bp_response(
                 if (ptype == 3) {
                     int32_t val = read_pcf_int32(pdata, plen);
                     switch (pid) {
-                    case 22:   bp.buffer_pool = val; break;
-                    case 1135: bp.free_buffers = val; break;
-                    case 1136: bp.total_buffers = val; break;
-                    case 1133: bp.location = val; break;
-                    case 1134: bp.page_class = val; break;
+                    case 1158: bp.buffer_pool = val; break;    // MQIACF_BUFFER_POOL_ID
+                    case 1330: bp.free_buffers = val; break;   // MQIACF_USAGE_FREE_BUFF
+                    case 1166: bp.total_buffers = val; break;  // MQIACF_USAGE_TOTAL_BUFFERS
+                    case 1170: bp.location = val; break;       // MQIACF_USAGE_BUFFER_POOL
                     }
                 }
             });
@@ -450,14 +449,14 @@ std::vector<UsagePSDetails> PCFInquiry::parse_usage_ps_response(
                 if (ptype == 3) {
                     int32_t val = read_pcf_int32(pdata, plen);
                     switch (pid) {
-                    case 62:   ps.pageset_id = val; break;
-                    case 22:   ps.buffer_pool = val; break;
-                    case 1126: ps.total_pages = val; break;
-                    case 1128: ps.unused_pages = val; break;
-                    case 1129: ps.persist_pages = val; break;
-                    case 1130: ps.nonpersist_pages = val; break;
-                    case 1131: ps.restart_pages = val; break;
-                    case 1132: ps.expand_count = val; break;
+                    case 62:   ps.pageset_id = val; break;       // MQIA_PAGESET_ID
+                    case 1170: ps.buffer_pool = val; break;      // MQIACF_USAGE_BUFFER_POOL
+                    case 1159: ps.total_pages = val; break;      // MQIACF_USAGE_TOTAL_PAGES
+                    case 1160: ps.unused_pages = val; break;     // MQIACF_USAGE_UNUSED_PAGES
+                    case 1161: ps.persist_pages = val; break;    // MQIACF_USAGE_PERSIST_PAGES
+                    case 1162: ps.nonpersist_pages = val; break; // MQIACF_USAGE_NONPERSIST_PAGES
+                    case 1163: ps.restart_pages = val; break;    // MQIACF_USAGE_RESTART_EXTENTS
+                    case 1164: ps.expand_count = val; break;     // MQIACF_USAGE_EXPAND_COUNT
                     }
                 }
             });
