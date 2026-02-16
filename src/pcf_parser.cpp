@@ -238,8 +238,8 @@ AccountingData PCFParser::parse_accounting(const PCFHeader& /*hdr*/,
                     switch (np.parameter) {
                     case pcf::MQIAMO_PUTS:          qa.puts = *v; break;
                     case pcf::MQIAMO_GETS:          qa.gets = *v; break;
-                    case pcf::MQIACF_MSGS_RECEIVED: qa.msgs_received = *v; break;
-                    case pcf::MQIACF_MSGS_SENT:     qa.msgs_sent = *v; break;
+                    case pcf::MQIAMO_MSGS_RCVD: qa.msgs_received = *v; break;
+                    case pcf::MQIAMO_MSGS_SENT:     qa.msgs_sent = *v; break;
                     }
                 }
             }
@@ -363,14 +363,11 @@ MQIStatistics PCFParser::parse_mqi_stats(const std::vector<PCFParameter>& params
             case pcf::MQIAMO_BROWSES: stats.browses = sum32; break;
             case pcf::MQIAMO_INQS:    stats.inqs = sum32; break;
             case pcf::MQIAMO_SETS:    stats.sets = sum32; break;
-            case pcf::MQIACF_MSGS_RECEIVED: stats.msgs_received = sum32; break;
-            case pcf::MQIACF_MSGS_SENT:     stats.msgs_sent = sum32; break;
-            case pcf::MQIACF_BYTES_RECEIVED: stats.bytes_received = sum64; break;
-            case pcf::MQIACF_BYTES_SENT:     stats.bytes_sent = sum64; break;
-            case pcf::MQIAMO_PARTIAL_BATCHES: stats.partial_batches = sum32; break;
-            case pcf::MQIAMO_BACKOUT_COUNT:  stats.backout_count = sum64; break;
-            case pcf::MQIAMO_COMMITS_COUNT:  stats.commits_count = sum64; break;
-            case pcf::MQIAMO_ROLLBACK_COUNT: stats.rollback_count = sum64; break;
+            case pcf::MQIAMO_MSGS_RCVD: stats.msgs_received = sum32; break;
+            case pcf::MQIAMO_MSGS_SENT:     stats.msgs_sent = sum32; break;
+            case pcf::MQIAMO_MSG_BYTES_RCVD: stats.bytes_received = sum64; break;
+            case pcf::MQIAMO_BYTES_SENT:     stats.bytes_sent = sum64; break;
+            case pcf::MQIAMO_INCOMPLETE_BATCHES: stats.incomplete_batch = sum32; break;
             case pcf::MQIAMO_SYNCPOINT_HEURISTIC: stats.syncpoint_heuristic = sum32; break;
             case pcf::MQIAMO_WAIT_INTERVAL: stats.wait_interval = sum32; break;
             case pcf::MQIAMO_HEAPS:         stats.heaps = sum32; break;
@@ -405,7 +402,7 @@ MQIStatistics PCFParser::parse_mqi_stats(const std::vector<PCFParameter>& params
             case pcf::MQIAMO_DISC_CLOSE_TIMEOUT: stats.disc_close_timeout = *v; break;
             case pcf::MQIAMO_DISC_RESET_TIMEOUT: stats.disc_reset_timeout = *v; break;
             case pcf::MQIAMO_FAILS:          stats.fails = *v; break;
-            case pcf::MQIAMO_INCOMPLETE_BATCH: stats.incomplete_batch = *v; break;
+            case pcf::MQIAMO_INCOMPLETE_BATCHES: stats.incomplete_batch = *v; break;
             case pcf::MQIAMO_INCOMPLETE_MSG:  stats.incomplete_msg = *v; break;
             case pcf::MQIAMO_WAIT_INTERVAL:  stats.wait_interval = *v; break;
             case pcf::MQIAMO_SYNCPOINT_HEURISTIC: stats.syncpoint_heuristic = *v; break;
@@ -418,15 +415,13 @@ MQIStatistics PCFParser::parse_mqi_stats(const std::vector<PCFParameter>& params
             case pcf::MQIAMO_LONG_MSGS:  stats.long_msgs = *v; break;
             case pcf::MQIAMO_SHORT_MSGS: stats.short_msgs = *v; break;
             case pcf::MQIAMO_STAMP_ENABLED: stats.stamp_enabled = *v; break;
-            case pcf::MQIACF_MSGS_RECEIVED: stats.msgs_received = *v; break;
-            case pcf::MQIACF_MSGS_SENT:     stats.msgs_sent = *v; break;
-            case pcf::MQIACF_CHANNEL_STATUS: stats.channel_status = *v; break;
-            case pcf::MQIACF_CHANNEL_TYPE:   stats.channel_type = *v; break;
-            case pcf::MQIACF_CHANNEL_ERRORS: stats.channel_errors = *v; break;
-            case pcf::MQIACF_CHANNEL_DISC_COUNT: stats.channel_disc_count = *v; break;
-            case pcf::MQIACF_CHANNEL_EXITNAME: stats.channel_exit_name = *v; break;
+            case pcf::MQIAMO_MSGS_RCVD: stats.msgs_received = *v; break;
+            case pcf::MQIAMO_MSGS_SENT:     stats.msgs_sent = *v; break;
+            case pcf::MQIACH_CHANNEL_STATUS: stats.channel_status = *v; break;
+            case pcf::MQIACH_CHANNEL_TYPE:   stats.channel_type = *v; break;
+            // channel_errors, channel_disc_count, channel_exit_name have no
+            // real IBM MQ parameter IDs — they are not emitted in PCF messages.
             case pcf::MQIAMO_FULL_BATCHES:  stats.full_batches = *v; break;
-            case pcf::MQIAMO_PARTIAL_BATCHES: stats.partial_batches = *v; break;
             }
         } else if (auto* s = std::get_if<std::string>(&p.value)) {
             switch (p.parameter) {

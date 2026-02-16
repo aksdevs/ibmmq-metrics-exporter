@@ -53,9 +53,9 @@ void MQClient::connect() {
                  config_.queue_manager, config_.channel, config_.get_connection_name(),
                  client_mode ? "client" : "binding");
 
-    MQCNO cno = MQCNO_DEFAULT;
-    MQCD cd = MQCD_CLIENT_CONN_DEFAULT;
-    MQCSP csp = MQCSP_DEFAULT;
+    MQCNO cno = {MQCNO_DEFAULT};
+    MQCD cd = {MQCD_CLIENT_CONN_DEFAULT};
+    MQCSP csp = {MQCSP_DEFAULT};
 
     if (client_mode) {
         cno.Options = MQCNO_CLIENT_BINDING;
@@ -84,7 +84,7 @@ void MQClient::connect() {
     }
 
     MQLONG cc = 0, rc = 0;
-    MQCONNX(config_.queue_manager.c_str(), &cno, &hconn_, &cc, &rc);
+    MQCONNX(const_cast<char*>(config_.queue_manager.c_str()), &cno, &hconn_, &cc, &rc);
 
     if (cc == MQCC_FAILED) {
         throw std::runtime_error("Failed to connect to queue manager " +
@@ -123,7 +123,7 @@ void MQClient::disconnect() {
 
 void MQClient::detect_platform() {
     // Open QM object for inquiry
-    MQOD od = MQOD_DEFAULT;
+    MQOD od = {MQOD_DEFAULT};
     od.ObjectType = MQOT_Q_MGR;
 
     MQHOBJ hobj = 0;
@@ -154,7 +154,7 @@ std::string MQClient::get_platform_string() const {
 }
 
 MQHOBJ MQClient::open_queue(const std::string& queue_name, MQLONG options) {
-    MQOD od = MQOD_DEFAULT;
+    MQOD od = {MQOD_DEFAULT};
     od.ObjectType = MQOT_Q;
     std::strncpy(od.ObjectName, queue_name.c_str(), sizeof(od.ObjectName) - 1);
 
@@ -171,7 +171,7 @@ MQHOBJ MQClient::open_queue(const std::string& queue_name, MQLONG options) {
 
 MQHOBJ MQClient::open_queue(const std::string& queue_name, MQLONG options,
                             const std::string& dynamic_q_name, std::string& resolved_name) {
-    MQOD od = MQOD_DEFAULT;
+    MQOD od = {MQOD_DEFAULT};
     od.ObjectType = MQOT_Q;
     std::strncpy(od.ObjectName, queue_name.c_str(), sizeof(od.ObjectName) - 1);
     std::strncpy(od.DynamicQName, dynamic_q_name.c_str(), sizeof(od.DynamicQName) - 1);
@@ -227,8 +227,8 @@ std::optional<MQMessage> MQClient::get_message(const std::string& queue_type) {
         throw std::runtime_error("Unknown queue type: " + queue_type);
     }
 
-    MQMD md = MQMD_DEFAULT;
-    MQGMO gmo = MQGMO_DEFAULT;
+    MQMD md = {MQMD_DEFAULT};
+    MQGMO gmo = {MQGMO_DEFAULT};
     gmo.Options = MQGMO_NO_WAIT | MQGMO_FAIL_IF_QUIESCING | MQGMO_CONVERT;
     gmo.WaitInterval = 1000;
 
@@ -393,7 +393,7 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
         return responses;
     }
 
-    MQMD md = MQMD_DEFAULT;
+    MQMD md = {MQMD_DEFAULT};
     std::memcpy(md.Format, "MQADMIN ", sizeof(md.Format));
     std::strncpy(md.ReplyToQ, reply_q_name.c_str(), sizeof(md.ReplyToQ) - 1);
     md.MsgType = MQMT_REQUEST;
@@ -401,7 +401,7 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
     for (size_t i = 0; i < sizeof(md.CorrelId); ++i)
         md.CorrelId[i] = static_cast<uint8_t>(65 + (i % 26));
 
-    MQPMO pmo = MQPMO_DEFAULT;
+    MQPMO pmo = {MQPMO_DEFAULT};
     pmo.Options = MQPMO_NONE;
 
     MQLONG cc = 0, rc = 0;
@@ -421,8 +421,8 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
     std::vector<uint8_t> resp_buf(BUF_SIZE);
 
     for (int i = 0; i < 1000; ++i) { // safety limit
-        MQMD resp_md = MQMD_DEFAULT;
-        MQGMO gmo = MQGMO_DEFAULT;
+        MQMD resp_md = {MQMD_DEFAULT};
+        MQGMO gmo = {MQGMO_DEFAULT};
         gmo.Options = MQGMO_WAIT | MQGMO_CONVERT;
         gmo.WaitInterval = 5000;
 
@@ -551,7 +551,7 @@ std::vector<std::string> MQClient::discover_queues(const std::string& pattern) {
 void MQClient::subscribe_to_topic(const std::string& topic_string) {
     if (!connected_) return;
 
-    MQSD sd = MQSD_DEFAULT;
+    MQSD sd = {MQSD_DEFAULT};
     sd.Options = MQSO_CREATE | MQSO_NON_DURABLE | MQSO_MANAGED | MQSO_FAIL_IF_QUIESCING;
 
     // Set the topic string
@@ -560,7 +560,7 @@ void MQClient::subscribe_to_topic(const std::string& topic_string) {
     sd.ObjectString.VSLength = static_cast<MQLONG>(topic_copy.size());
 
     MQHOBJ hobj = 0;
-    MQHSUB hsub = 0;
+    MQHOBJ hsub = 0;
     MQLONG cc = 0, rc = 0;
 
     MQSUB(hconn_, &sd, &hobj, &hsub, &cc, &rc);
@@ -582,8 +582,8 @@ std::vector<MQMessage> MQClient::receive_publications() {
     std::vector<uint8_t> buffer(BUF_SIZE);
 
     for (auto& sub : subscriptions_) {
-        MQMD md = MQMD_DEFAULT;
-        MQGMO gmo = MQGMO_DEFAULT;
+        MQMD md = {MQMD_DEFAULT};
+        MQGMO gmo = {MQGMO_DEFAULT};
         gmo.Options = MQGMO_NO_WAIT | MQGMO_CONVERT;
 
         MQLONG datalen = 0, cc = 0, rc = 0;
@@ -607,7 +607,7 @@ void MQClient::unsubscribe_all() {
     for (auto& sub : subscriptions_) {
         MQLONG cc = 0, rc = 0;
         if (sub.hsub != 0) {
-            MQCLOSE(hconn_, reinterpret_cast<MQHOBJ*>(&sub.hsub), MQCO_NONE, &cc, &rc);
+            MQCLOSE(hconn_, &sub.hsub, MQCO_NONE, &cc, &rc);
         }
         if (sub.hobj != 0) {
             MQCLOSE(hconn_, &sub.hobj, MQCO_NONE, &cc, &rc);
