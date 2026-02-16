@@ -135,14 +135,13 @@ namespace pcf {
     constexpr int32_t MQCFT_INTEGER64_LIST = 25;
     constexpr int32_t MQCFT_COMMAND_XR     = 16;
 
-    // Command types
-    constexpr int32_t CMD_STATISTICS_MQI     = 112;
-    constexpr int32_t CMD_STATISTICS_Q       = 113;
-    constexpr int32_t CMD_STATISTICS_CHANNEL = 114;
-    constexpr int32_t CMD_Q_MGR_STATUS       = 164;
-    constexpr int32_t CMD_ACCOUNTING_MQI     = 138;
-    constexpr int32_t CMD_ACCOUNTING_Q       = 139;
-    constexpr int32_t CMD_ACCOUNTING_CHANNEL = 167;
+    // Command types (real IBM MQ 9.x values)
+    constexpr int32_t CMD_INQUIRE_Q_MGR_STATUS = 161;
+    constexpr int32_t CMD_STATISTICS_MQI       = 164;
+    constexpr int32_t CMD_STATISTICS_Q         = 165;
+    constexpr int32_t CMD_STATISTICS_CHANNEL   = 166;
+    constexpr int32_t CMD_ACCOUNTING_MQI       = 167;
+    constexpr int32_t CMD_ACCOUNTING_Q         = 168;
 
     // Parameter IDs
     constexpr int32_t MQCA_Q_NAME            = 2016;
