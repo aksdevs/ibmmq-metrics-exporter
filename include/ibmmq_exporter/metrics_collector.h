@@ -3,6 +3,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -59,6 +60,7 @@ private:
     void collect_qmgr_status();
     void collect_cluster_status();
     void collect_usage_status();
+    void collect_queue_online_status();
 
     void update_handle_metrics_from_statistics(const StatisticsData& stats);
     void set_baseline_metrics(int stats_count, int acct_count);
@@ -90,6 +92,14 @@ private:
     prometheus::Family<prometheus::Gauge>* queue_writers_{nullptr};
     prometheus::Family<prometheus::Gauge>* queue_process_{nullptr};
 
+    prometheus::Family<prometheus::Gauge>* queue_max_depth_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_oldest_msg_age_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_uncommitted_msgs_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_qtime_short_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_qtime_long_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_qfile_current_size_{nullptr};
+    prometheus::Family<prometheus::Gauge>* queue_qfile_max_size_{nullptr};
+
     // Per-queue per-app metrics
     prometheus::Family<prometheus::Gauge>* queue_app_puts_{nullptr};
     prometheus::Family<prometheus::Gauge>* queue_app_gets_{nullptr};
@@ -111,6 +121,19 @@ private:
     prometheus::Family<prometheus::Gauge>* channel_status_msgs_{nullptr};
     prometheus::Family<prometheus::Gauge>* channel_bytes_sent_{nullptr};
     prometheus::Family<prometheus::Gauge>* channel_bytes_received_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_buffers_sent_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_buffers_received_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_substate_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_instance_type_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_nettime_short_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_nettime_long_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_xmitq_time_short_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_xmitq_time_long_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_batch_size_short_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_batch_size_long_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_max_instc_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_cur_instc_{nullptr};
+    prometheus::Family<prometheus::Gauge>* channel_status_squash_{nullptr};
 
     // Topic status metrics
     prometheus::Family<prometheus::Gauge>* topic_pub_count_{nullptr};
@@ -119,14 +142,18 @@ private:
     // Subscription status metrics
     prometheus::Family<prometheus::Gauge>* sub_durable_{nullptr};
     prometheus::Family<prometheus::Gauge>* sub_type_{nullptr};
+    prometheus::Family<prometheus::Gauge>* sub_message_count_{nullptr};
 
     // QM status metrics
     prometheus::Family<prometheus::Gauge>* qmgr_status_{nullptr};
     prometheus::Family<prometheus::Gauge>* qmgr_connection_count_{nullptr};
     prometheus::Family<prometheus::Gauge>* qmgr_chinit_status_{nullptr};
+    prometheus::Family<prometheus::Gauge>* qmgr_cmd_server_status_{nullptr};
+    prometheus::Family<prometheus::Gauge>* qmgr_uptime_{nullptr};
 
     // Cluster metrics
     prometheus::Family<prometheus::Gauge>* cluster_qmgr_status_{nullptr};
+    prometheus::Family<prometheus::Gauge>* cluster_qmgr_suspend_{nullptr};
 
     // z/OS Buffer Pool metrics
     prometheus::Family<prometheus::Gauge>* usage_bp_free_{nullptr};
@@ -152,6 +179,9 @@ private:
 
     // Cache of process info per queue
     std::map<std::string, std::vector<ProcInfo>> queue_procs_cache_;
+
+    // Cached queue list per collection cycle (avoid redundant PCF discovery)
+    std::vector<std::string> cached_queues_;
 };
 
 } // namespace ibmmq_exporter
