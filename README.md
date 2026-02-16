@@ -5,17 +5,20 @@ A Prometheus exporter for IBM MQ queue managers, written in C++. Collects metric
 ## Features
 
 - **Queue metrics**: depth, high watermark, enqueue/dequeue counts, open handles
-- **Channel status**: running/stopped state, messages transferred, bytes sent/received
+- **Channel status**: running/stopped state (with simplified 0-3 status value), messages transferred, bytes sent/received
 - **Topic and subscription status**: publisher/subscriber counts, durable subscriptions
 - **Queue manager status**: operational state, connection count, CHINIT status
 - **Cluster status**: cluster queue manager state and type
+- **Resource monitoring**: CPU, memory, and disk utilization metrics from queue manager
+- **Statistics/Accounting**: per-application and per-queue MQI operation counts from statistics messages
 - **z/OS metrics**: buffer pool and page set utilization
-- **MQI statistics**: per-application operation counts from statistics/accounting messages
+- **Publication metrics**: exact topic subscriptions for resource monitoring classes (CPU/DISK/STATMQI/STATQ/STATAPP)
 - **Reconnection**: survives queue manager restarts, reports `qmgr_status=0` while disconnected
-- **Dynamic discovery**: periodically rediscovers queues and channels matching patterns
+- **Dynamic discovery**: periodically rediscovers queues and channels matching patterns, filters out model/temporary queues
 - **Grafana dashboards**: 7 pre-built dashboards for channels, queues, topics, QM status, z/OS, and overview
 - **Cross-platform**: builds on Windows, Linux, macOS; connects to MQ on any supported platform
 - **Container-ready**: multi-stage Dockerfile included
+- **Queue leak prevention**: automatic cleanup of temporary dynamic queues after PCF commands and subscriptions
 
 ## Quick Start
 
@@ -166,11 +169,12 @@ All metrics use the configured namespace (default: `ibmmq`).
 | Metric | Labels | Description |
 |---|---|---|
 | `ibmmq_channel_status` | qmgr, platform, channel, type, connname, rqmname | Channel status code |
+| `ibmmq_channel_status_squash` | qmgr, platform, channel, type, connname, rqmname | Simplified channel status (0=OK, 1=transitioning, 2=stopped, 3=unknown) |
 | `ibmmq_channel_status_msgs` | qmgr, platform, channel, type | Messages transferred |
 | `ibmmq_channel_bytes_sent` | qmgr, platform, channel, type | Bytes sent |
 | `ibmmq_channel_bytes_received` | qmgr, platform, channel, type | Bytes received |
 
-### Queue Manager Metrics
+### Queue Manager Status Metrics
 
 | Metric | Labels | Description |
 |---|---|---|
@@ -186,6 +190,44 @@ All metrics use the configured namespace (default: `ibmmq`).
 | `ibmmq_topic_sub_count` | qmgr, platform, topic | Subscriber count |
 | `ibmmq_sub_durable` | qmgr, platform, subscription, topic | Durable flag |
 | `ibmmq_sub_type` | qmgr, platform, subscription, topic | Subscription type |
+
+### Resource Monitoring Metrics (CPU, Memory, Disk)
+
+When resource monitoring is enabled on the queue manager, the following metrics are collected via publication subscriptions:
+
+| Metric | Class | Description |
+|---|---|---|
+| `ibmmq_qmgr_cpu_user` | CPU | User CPU percentage |
+| `ibmmq_qmgr_cpu_system` | CPU | System CPU percentage |
+| `ibmmq_qmgr_memory_resident` | Memory | Resident memory (MB) |
+| `ibmmq_qmgr_memory_virtual` | Memory | Virtual memory (MB) |
+| `ibmmq_qmgr_disk_free_space` | Disk | Free disk space |
+| `ibmmq_qmgr_disk_total_space` | Disk | Total disk space |
+| `ibmmq_qmgr_disk_utilization` | Disk | Disk utilization percentage |
+
+### Statistics Metrics (STATMQI - Per-Application)
+
+Application-level MQI statistics from `SYSTEM.ADMIN.STATISTICS.QUEUE`:
+
+| Metric | Description |
+|---|---|
+| `ibmmq_statmqi_put_messages` | Messages put by application |
+| `ibmmq_statmqi_get_messages` | Messages gotten by application |
+| `ibmmq_statmqi_subscribe_count` | Active subscriptions |
+| `ibmmq_statmqi_publish_count` | Messages published |
+| `ibmmq_statmqi_connect_count` | New connections |
+| `ibmmq_statmqi_disconnect_count` | Disconnects |
+
+### Per-Queue Statistics Metrics (STATQ)
+
+| Metric | Description |
+|---|---|
+| `ibmmq_statq_put_messages` | Messages put to queue |
+| `ibmmq_statq_get_messages` | Messages gotten from queue |
+| `ibmmq_statq_open_input` | Open input operations |
+| `ibmmq_statq_open_output` | Open output operations |
+| `ibmmq_statq_synced_put` | Synced message puts |
+| `ibmmq_statq_synced_get` | Synced message gets |
 
 ### z/OS Metrics
 
