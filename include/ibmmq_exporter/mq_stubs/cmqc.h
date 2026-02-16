@@ -111,8 +111,9 @@ typedef MQCHAR*  PMQCHAR;
 #define MQPL_APPLIANCE   28
 
 /* Close options */
-#define MQCO_NONE     0x00000000
-#define MQCO_DELETE   0x00000004
+#define MQCO_NONE          0x00000000
+#define MQCO_DELETE        0x00000001
+#define MQCO_DELETE_PURGE  0x00000002
 
 /* Subscription options */
 #define MQSO_CREATE              0x00000002

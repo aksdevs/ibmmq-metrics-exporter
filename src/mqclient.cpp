@@ -199,6 +199,13 @@ void MQClient::close_queue(MQHOBJ& hobj) {
     hobj = 0;
 }
 
+static void close_queue_with_options(MQHCONN hconn, MQHOBJ& hobj, MQLONG options) {
+    if (hobj == 0) return;
+    MQLONG cc = 0, rc = 0;
+    MQCLOSE(hconn, &hobj, options, &cc, &rc);
+    hobj = 0;
+}
+
 void MQClient::open_stats_queue(const std::string& queue_name) {
     if (!connected_) throw std::runtime_error("Not connected to queue manager");
     stats_queue_ = open_queue(queue_name,
@@ -380,7 +387,7 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
     }
 
     if (reply_q_name.empty() || reply_q_name == "SYSTEM.DEFAULT.MODEL.QUEUE") {
-        close_queue(reply_hobj);
+        close_queue_with_options(hconn_, reply_hobj, MQCO_DELETE_PURGE);
         return responses;
     }
 
@@ -389,7 +396,7 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
     try {
         cmd_hobj = open_queue("SYSTEM.ADMIN.COMMAND.QUEUE", MQOO_OUTPUT);
     } catch (...) {
-        close_queue(reply_hobj);
+        close_queue_with_options(hconn_, reply_hobj, MQCO_DELETE_PURGE);
         return responses;
     }
 
@@ -412,7 +419,7 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
 
     if (cc == MQCC_FAILED) {
         spdlog::debug("Failed to send PCF command (RC={})", rc);
-        close_queue(reply_hobj);
+        close_queue_with_options(hconn_, reply_hobj, MQCO_DELETE_PURGE);
         return responses;
     }
 
@@ -444,7 +451,7 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
         }
     }
 
-    close_queue(reply_hobj);
+    close_queue_with_options(hconn_, reply_hobj, MQCO_DELETE_PURGE);
     spdlog::debug("Received {} PCF response(s)", responses.size());
     return responses;
 }
@@ -582,16 +589,19 @@ std::vector<MQMessage> MQClient::receive_publications() {
     std::vector<uint8_t> buffer(BUF_SIZE);
 
     for (auto& sub : subscriptions_) {
-        MQMD md = {MQMD_DEFAULT};
-        MQGMO gmo = {MQGMO_DEFAULT};
-        gmo.Options = MQGMO_NO_WAIT | MQGMO_CONVERT;
+        // Drain ALL pending messages from this subscription's managed queue
+        for (int safety = 0; safety < 500; ++safety) {
+            MQMD md = {MQMD_DEFAULT};
+            MQGMO gmo = {MQGMO_DEFAULT};
+            gmo.Options = MQGMO_NO_WAIT | MQGMO_CONVERT;
 
-        MQLONG datalen = 0, cc = 0, rc = 0;
-        MQGET(hconn_, sub.hobj, &md, &gmo,
-              static_cast<MQLONG>(buffer.size()),
-              buffer.data(), &datalen, &cc, &rc);
+            MQLONG datalen = 0, cc = 0, rc = 0;
+            MQGET(hconn_, sub.hobj, &md, &gmo,
+                  static_cast<MQLONG>(buffer.size()),
+                  buffer.data(), &datalen, &cc, &rc);
 
-        if (cc == MQCC_OK && datalen > 0) {
+            if (cc == MQCC_FAILED || datalen <= 0) break;
+
             MQMessage msg;
             msg.data.assign(buffer.begin(), buffer.begin() + datalen);
             msg.type = "publication";
@@ -600,6 +610,11 @@ std::vector<MQMessage> MQClient::receive_publications() {
             messages.push_back(std::move(msg));
         }
     }
+
+    if (!messages.empty())
+        spdlog::debug("Received {} publication messages from {} subscriptions",
+                     messages.size(), subscriptions_.size());
+
     return messages;
 }
 
@@ -624,26 +639,27 @@ std::optional<MQMessage> MQClient::subscribe_and_get(const std::string& topic_st
         return std::nullopt;
     }
 
-    // Try to get one retained message (no wait)
+    // Get retained message (short wait to allow delivery)
     constexpr size_t BUF_SIZE = 64 * 1024;
     std::vector<uint8_t> buffer(BUF_SIZE);
 
     MQMD md = {MQMD_DEFAULT};
     MQGMO gmo = {MQGMO_DEFAULT};
-    gmo.Options = MQGMO_NO_WAIT | MQGMO_CONVERT;
+    gmo.Options = MQGMO_WAIT | MQGMO_CONVERT;
+    gmo.WaitInterval = 3000; // 3 seconds for retained publication to arrive
 
     MQLONG datalen = 0;
     MQGET(hconn_, hobj, &md, &gmo,
           static_cast<MQLONG>(buffer.size()),
           buffer.data(), &datalen, &cc, &rc);
 
-    // Close subscription and managed queue
+    // Close subscription handle first, then the managed destination queue
     MQLONG cc2 = 0, rc2 = 0;
     if (hsub != 0) MQCLOSE(hconn_, &hsub, MQCO_NONE, &cc2, &rc2);
     if (hobj != 0) MQCLOSE(hconn_, &hobj, MQCO_NONE, &cc2, &rc2);
 
     if (cc == MQCC_FAILED || datalen <= 0) {
-        spdlog::debug("No retained message on '{}' (RC={})", topic_string, rc);
+        spdlog::warn("No retained message on '{}' (RC={})", topic_string, rc);
         return std::nullopt;
     }
 

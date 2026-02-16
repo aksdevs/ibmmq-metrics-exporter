@@ -153,13 +153,20 @@ bool ResourceMonitor::discover() {
 
 bool ResourceMonitor::discover_classes() {
     std::string classes_topic = "$SYS/MQ/INFO/QMGR/" + qmgr_name_ + "/Monitor/METADATA/CLASSES";
+    spdlog::info("Subscribing to metadata topic: {}", classes_topic);
+
     auto msg = client_.subscribe_and_get(classes_topic);
-    if (!msg) return false;
+    if (!msg) {
+        spdlog::warn("No response from CLASSES metadata topic — is resource monitoring enabled on QM '{}'?", qmgr_name_);
+        return false;
+    }
 
     const auto& data = msg->data;
+    spdlog::info("Received CLASSES metadata: {} bytes", data.size());
     if (data.size() < PCF_HEADER_SIZE) return false;
 
     auto params = parse_pcf_params(data.data() + PCF_HEADER_SIZE, data.size() - PCF_HEADER_SIZE);
+    spdlog::info("Parsed {} top-level PCF parameters from CLASSES metadata", params.size());
 
     // Each group represents a class
     for (const auto& p : params) {
@@ -177,7 +184,7 @@ bool ResourceMonitor::discover_classes() {
 
         if (cls.class_name.empty()) continue;
 
-        spdlog::debug("Found class '{}' ({}), types topic: {}",
+        spdlog::info("Found monitor class '{}' (id={}), types topic: {}",
                      cls.class_name, cls.class_id, cls.topic_string);
 
         // Discover types for this class
@@ -193,7 +200,10 @@ bool ResourceMonitor::discover_types(MonitorClass& cls) {
     if (cls.topic_string.empty()) return false;
 
     auto msg = client_.subscribe_and_get(cls.topic_string);
-    if (!msg) return false;
+    if (!msg) {
+        spdlog::warn("No response from types topic for class '{}'", cls.class_name);
+        return false;
+    }
 
     const auto& data = msg->data;
     if (data.size() < PCF_HEADER_SIZE) return false;
@@ -217,8 +227,8 @@ bool ResourceMonitor::discover_types(MonitorClass& cls) {
 
         if (mtype.type_name.empty() || elements_topic.empty()) continue;
 
-        spdlog::debug("  Found type '{}' ({}), elements topic: {}",
-                     mtype.type_name, mtype.type_id, elements_topic);
+        spdlog::info("  Type '{}' (id={}) in class '{}', elements topic: {}",
+                     mtype.type_name, mtype.type_id, cls.class_name, elements_topic);
 
         // Discover elements by subscribing to the elements metadata topic
         discover_elements(cls, mtype, elements_topic);
@@ -230,10 +240,13 @@ bool ResourceMonitor::discover_types(MonitorClass& cls) {
     return !cls.types.empty();
 }
 
-bool ResourceMonitor::discover_elements(MonitorClass& /*cls*/, MonitorType& mtype,
+bool ResourceMonitor::discover_elements(MonitorClass& cls, MonitorType& mtype,
                                          const std::string& elements_topic) {
     auto msg = client_.subscribe_and_get(elements_topic);
-    if (!msg) return false;
+    if (!msg) {
+        spdlog::warn("No response from elements topic '{}' for {}/{}", elements_topic, cls.class_name, mtype.type_name);
+        return false;
+    }
 
     const auto& data = msg->data;
     if (data.size() < PCF_HEADER_SIZE) return false;
