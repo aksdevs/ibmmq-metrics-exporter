@@ -68,35 +68,40 @@ std::vector<ResourceMonitor::PCFParam> ResourceMonitor::parse_pcf_params(
                 p.int_value = static_cast<int32_t>(p.int64_value);
             }
         } else if (type == PCF_GROUP) {
+            // MQCFGR: the header is 16 bytes (type, struc_len, param_id, group_count).
+            // The inner parameters follow SEQUENTIALLY in the stream after the header,
+            // NOT within the group's StrucLength byte range.
             int32_t group_count = 0;
             std::memcpy(&group_count, data + offset + 12, 4);
 
-            // Parse nested parameters inside the group
-            size_t inner_offset = offset + 16;
-            for (int32_t i = 0; i < group_count && inner_offset < offset + static_cast<size_t>(struc_len); ++i) {
-                if (inner_offset + 16 > len) break;
+            // Advance past the 16-byte group header
+            offset += 16;
+
+            // Parse the next group_count parameters from the stream
+            for (int32_t i = 0; i < group_count; ++i) {
+                if (offset + 16 > len) break;
 
                 int32_t inner_type = 0, inner_len = 0, inner_param = 0;
-                std::memcpy(&inner_type, data + inner_offset, 4);
-                std::memcpy(&inner_len, data + inner_offset + 4, 4);
-                std::memcpy(&inner_param, data + inner_offset + 8, 4);
+                std::memcpy(&inner_type, data + offset, 4);
+                std::memcpy(&inner_len, data + offset + 4, 4);
+                std::memcpy(&inner_param, data + offset + 8, 4);
 
-                if (inner_len < 16 || inner_offset + static_cast<size_t>(inner_len) > len) break;
+                if (inner_len < 16 || offset + static_cast<size_t>(inner_len) > len) break;
 
                 PCFParam inner;
                 inner.type = inner_type;
                 inner.param_id = inner_param;
 
                 if (inner_type == PCF_INTEGER) {
-                    std::memcpy(&inner.int_value, data + inner_offset + 12, 4);
+                    std::memcpy(&inner.int_value, data + offset + 12, 4);
                     inner.int64_value = inner.int_value;
                 } else if (inner_type == PCF_STRING) {
                     if (inner_len >= 20) {
                         int32_t str_len = 0;
-                        std::memcpy(&str_len, data + inner_offset + 16, 4);
-                        if (str_len > 0 && inner_offset + 20 + static_cast<size_t>(str_len) <= len) {
+                        std::memcpy(&str_len, data + offset + 16, 4);
+                        if (str_len > 0 && offset + 20 + static_cast<size_t>(str_len) <= len) {
                             inner.str_value = std::string(
-                                reinterpret_cast<const char*>(data + inner_offset + 20), str_len);
+                                reinterpret_cast<const char*>(data + offset + 20), str_len);
                             auto pos = inner.str_value.find_last_not_of(" \0");
                             if (pos != std::string::npos) inner.str_value.resize(pos + 1);
                             else inner.str_value.clear();
@@ -104,14 +109,19 @@ std::vector<ResourceMonitor::PCFParam> ResourceMonitor::parse_pcf_params(
                     }
                 } else if (inner_type == PCF_INTEGER64) {
                     if (inner_len >= 24) {
-                        std::memcpy(&inner.int64_value, data + inner_offset + 16, 8);
+                        std::memcpy(&inner.int64_value, data + offset + 16, 8);
                         inner.int_value = static_cast<int32_t>(inner.int64_value);
                     }
                 }
 
                 p.group_params.push_back(std::move(inner));
-                inner_offset += static_cast<size_t>(inner_len);
+                offset += static_cast<size_t>(inner_len);
             }
+
+            // Group already advanced offset past header + all inner params; skip the
+            // normal offset += struc_len below.
+            params.push_back(std::move(p));
+            continue;
         }
 
         params.push_back(std::move(p));
