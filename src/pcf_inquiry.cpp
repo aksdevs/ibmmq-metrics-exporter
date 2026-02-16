@@ -160,6 +160,14 @@ std::vector<uint8_t> PCFInquiry::build_inquire_usage_cmd(int32_t usage_type) {
     return buf;
 }
 
+std::vector<uint8_t> PCFInquiry::build_inquire_q_status_online_cmd(const std::string& queue_name) {
+    auto buf = build_pcf_cmd(41, 2); // MQCMD_INQUIRE_Q_STATUS = 41
+    append_string_param(buf, 2016, queue_name); // MQCA_Q_NAME
+    append_integer_param(buf, 1103, 1105); // MQIACF_Q_STATUS_TYPE = MQIACF_Q_STATUS (online)
+    spdlog::debug("Built INQUIRE_Q_STATUS (online) for {}, size={}", queue_name, buf.size());
+    return buf;
+}
+
 std::vector<uint8_t> PCFInquiry::build_reset_q_stats_cmd(const std::string& queue_name) {
     auto buf = build_pcf_cmd(17, 1); // MQCMD_RESET_Q_STATS
     append_string_param(buf, 2016, queue_name); // MQCA_Q_NAME
@@ -240,6 +248,21 @@ static int64_t read_pcf_int64(const uint8_t* pdata, uint32_t plen) {
     return read_int64(pdata + 16);
 }
 
+// Helper: read an integer list from a MQCFIL parameter structure.
+// MQCFIL: Type(4) StrucLength(4) Parameter(4) Count(4) Values[N*4]
+//         0       4              8             12       16
+static std::vector<int32_t> read_pcf_int_list(const uint8_t* pdata, uint32_t plen) {
+    std::vector<int32_t> values;
+    if (plen < 16) return values;
+    uint32_t count = read_int32(pdata + 12);
+    if (16 + count * 4 > plen) count = (plen - 16) / 4;
+    values.reserve(count);
+    for (uint32_t i = 0; i < count; ++i) {
+        values.push_back(static_cast<int32_t>(read_int32(pdata + 16 + i * 4)));
+    }
+    return values;
+}
+
 // --- Channel status parser ---
 
 std::vector<ChannelStatusDetails> PCFInquiry::parse_channel_status_response(
@@ -256,6 +279,10 @@ std::vector<ChannelStatusDetails> PCFInquiry::parse_channel_status_response(
                     case 3501: ch.channel_name = val; break;    // MQCACH_CHANNEL_NAME
                     case 3506: ch.connection_name = val; break; // MQCACH_CONNECTION_NAME
                     case 3507: ch.remote_qmgr = val; break;    // MQCACH_MCA_NAME (remote partner)
+                    case 3524: ch.last_msg_time = val; break;   // MQCACH_LAST_MSG_TIME
+                    case 3525: ch.last_msg_date = val; break;   // MQCACH_LAST_MSG_DATE
+                    case 3528: ch.start_time = val; break;      // MQCACH_CHANNEL_START_TIME
+                    case 3529: ch.start_date = val; break;      // MQCACH_CHANNEL_START_DATE
                     case 3530: ch.job_name = val; break;        // MQCACH_MCA_JOB_NAME
                     case 3544: ch.ssl_cipher = val; break;      // MQCACH_SSL_CIPHER_SPEC
                     }
@@ -268,12 +295,33 @@ std::vector<ChannelStatusDetails> PCFInquiry::parse_channel_status_response(
                     case 1537: ch.batches = val; break;         // MQIACH_BATCHES
                     case 1609: ch.substate = val; break;        // MQIACH_CHANNEL_SUBSTATE
                     case 1523: ch.instance_type = val; break;   // MQIACH_CHANNEL_INSTANCE_TYPE
+                    case 1538: ch.buffers_sent = val; break;    // MQIACH_BUFFERS_SENT
+                    case 1539: ch.buffers_received = val; break;// MQIACH_BUFFERS_RCVD
+                    case 1585: ch.cur_sharing_convs = val; break; // MQIACH_CURRENT_SHARING_CONVS
+                    case 1618: ch.max_instances = val; break;   // MQIACH_MAX_INSTANCES
+                    case 1619: ch.max_insts_per_client = val; break; // MQIACH_MAX_INSTS_PER_CLIENT
                     }
                 } else if (ptype == 23) { // MQCFT_INTEGER64
                     int64_t val = read_pcf_int64(pdata, plen);
                     switch (pid) {
                     case 1535: ch.bytes_sent = val; break;      // MQIACH_BYTES_SENT
                     case 1536: ch.bytes_received = val; break;  // MQIACH_BYTES_RECEIVED
+                    }
+                } else if (ptype == 5) { // MQCFT_INTEGER_LIST
+                    auto vals = read_pcf_int_list(pdata, plen);
+                    switch (pid) {
+                    case 1605: // MQIACH_NETWORK_TIME_INDICATOR
+                        if (vals.size() >= 1) ch.nettime_short = vals[0];
+                        if (vals.size() >= 2) ch.nettime_long = vals[1];
+                        break;
+                    case 1604: // MQIACH_XMITQ_TIME_INDICATOR
+                        if (vals.size() >= 1) ch.xmitq_time_short = vals[0];
+                        if (vals.size() >= 2) ch.xmitq_time_long = vals[1];
+                        break;
+                    case 1607: // MQIACH_BATCH_SIZE_INDICATOR
+                        if (vals.size() >= 1) ch.batch_size_short = vals[0];
+                        if (vals.size() >= 2) ch.batch_size_long = vals[1];
+                        break;
                     }
                 }
             });
@@ -332,12 +380,15 @@ std::vector<SubStatusDetails> PCFInquiry::parse_sub_status_response(
                     case 2094: sub.topic_string = val; break;  // MQCA_TOPIC_STRING
                     case 3154: sub.destination = val; break;   // MQCACF_DESTINATION
                     case 7016: sub.sub_id = val; break;        // MQBACF_SUB_ID
+                    case 3167: sub.last_msg_time = val; break; // MQCACF_LAST_MSG_TIME
+                    case 3168: sub.last_msg_date = val; break; // MQCACF_LAST_MSG_DATE
                     }
                 } else if (ptype == 3) {
                     int32_t val = read_pcf_int32(pdata, plen);
                     switch (pid) {
                     case 1289: sub.sub_type = val; break;      // MQIACF_SUB_TYPE
                     case 175:  sub.durable = val; break;       // MQIA_DURABLE_SUB
+                    case 1290: sub.message_count = val; break; // MQIACF_MESSAGE_COUNT
                     }
                 }
             });
@@ -402,6 +453,7 @@ std::vector<ClusterQMgrDetails> PCFInquiry::parse_cluster_qmgr_response(
                     switch (pid) {
                     case 125:  cl.qm_type = val; break;
                     case 1127: cl.status = val; break;
+                    case 1087: cl.suspend = val; break;        // MQIACF_SUSPEND
                     }
                 }
             });
@@ -462,6 +514,47 @@ std::vector<UsagePSDetails> PCFInquiry::parse_usage_ps_response(
             });
         result.push_back(std::move(ps));
     }
+    return result;
+}
+
+// --- Queue online status parser ---
+
+std::vector<QueueOnlineStatus> PCFInquiry::parse_queue_online_status_response(
+        const std::vector<std::vector<uint8_t>>& responses) {
+    std::vector<QueueOnlineStatus> result;
+    for (const auto& resp : responses) {
+        if (resp.size() < MQCFH_SIZE) continue;
+        QueueOnlineStatus qs;
+        parse_pcf_response_params(resp.data(), resp.size(),
+            [&](uint32_t ptype, uint32_t pid, const uint8_t* pdata, uint32_t plen) {
+                if (ptype == 4) { // MQCFT_STRING
+                    auto val = read_pcf_string(pdata, plen);
+                    switch (pid) {
+                    case 2016: qs.queue_name = val; break;      // MQCA_Q_NAME
+                    case 3128: qs.last_put_date = val; break;   // MQCACF_LAST_PUT_DATE
+                    case 3129: qs.last_put_time = val; break;   // MQCACF_LAST_PUT_TIME
+                    case 3130: qs.last_get_date = val; break;   // MQCACF_LAST_GET_DATE
+                    case 3131: qs.last_get_time = val; break;   // MQCACF_LAST_GET_TIME
+                    }
+                } else if (ptype == 3) { // MQCFT_INTEGER
+                    int32_t val = read_pcf_int32(pdata, plen);
+                    switch (pid) {
+                    case 1227: qs.oldest_msg_age = val; break;      // MQIACF_OLDEST_MSG_AGE
+                    case 1027: qs.uncommitted_msgs = val; break;    // MQIACF_UNCOMMITTED_MSGS
+                    case 1437: qs.cur_q_file_size = val; break;     // MQIACF_CUR_Q_FILE_SIZE
+                    case 1438: qs.cur_max_file_size = val; break;   // MQIACF_CUR_MAX_FILE_SIZE
+                    }
+                } else if (ptype == 5) { // MQCFT_INTEGER_LIST
+                    auto vals = read_pcf_int_list(pdata, plen);
+                    if (pid == 1226) { // MQIACF_Q_TIME_INDICATOR
+                        if (vals.size() >= 1) qs.qtime_short = vals[0];
+                        if (vals.size() >= 2) qs.qtime_long = vals[1];
+                    }
+                }
+            });
+        if (!qs.queue_name.empty()) result.push_back(std::move(qs));
+    }
+    spdlog::debug("Parsed {} queue online status entries", result.size());
     return result;
 }
 

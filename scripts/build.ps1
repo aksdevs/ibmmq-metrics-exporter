@@ -97,8 +97,34 @@ switch ($Compiler) {
         )
     }
     "msvc" {
-        # Use default Visual Studio generator
-        $CMakeArgs += @("-G", "Visual Studio 17 2022", "-A", "x64")
+        # Auto-detect Visual Studio version via vswhere
+        $vsWhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $generator = $null
+        if (Test-Path $vsWhere) {
+            $vsVersion = & $vsWhere -latest -property catalog_productLineVersion 2>$null
+            $vsMajor = & $vsWhere -latest -property installationVersion 2>$null
+            if ($vsMajor) {
+                $majorNum = ($vsMajor -split '\.')[0]
+                # Only map VS versions with known CMake generator support.
+                # Newer VS versions (18+) may not have a matching CMake generator yet.
+                $vsGenerators = @{
+                    "17" = "Visual Studio 17 2022"
+                }
+                if ($vsGenerators.ContainsKey($majorNum)) {
+                    $generator = $vsGenerators[$majorNum]
+                }
+                Write-Host "Detected Visual Studio $vsVersion (v$vsMajor)" -ForegroundColor Green
+            }
+        }
+
+        if ($generator) {
+            $CMakeArgs += @("-G", $generator, "-A", "x64")
+        } else {
+            # Fall back to Ninja for VS versions without a CMake generator.
+            # Ninja works with any MSVC toolchain and is widely available.
+            Write-Host "Using Ninja generator (no CMake generator for this VS version)" -ForegroundColor Yellow
+            $CMakeArgs += @("-G", "Ninja")
+        }
     }
 }
 

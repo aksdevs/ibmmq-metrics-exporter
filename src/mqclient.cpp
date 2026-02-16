@@ -10,6 +10,36 @@
 
 namespace ibmmq_exporter {
 
+// Strip MQRFH2 header from message data if present.
+// IBM MQ wraps managed subscription messages in MQRFH2 headers.
+// Structure: StrucId("RFH ") Version(4) StrucLength(4) ... PCF data at offset StrucLength.
+static void strip_mqrfh2(MQMessage& msg) {
+    if (msg.data.size() < 16) return;
+
+    // Check for "RFH " magic at offset 0
+    if (msg.data[0] != 'R' || msg.data[1] != 'F' ||
+        msg.data[2] != 'H' || msg.data[3] != ' ')
+        return;
+
+    // Read StrucLength at offset 8 (total MQRFH2 size including variable parts)
+    int32_t struc_length = 0;
+    std::memcpy(&struc_length, msg.data.data() + 8, 4);
+
+    if (struc_length < 36 || static_cast<size_t>(struc_length) >= msg.data.size())
+        return;
+
+    // MQRFH2 layout: StrucId(4) Version(4) StrucLength(4) Encoding(4) CCSID(4) Format(8) ...
+    // Format is at offset 20 (8 bytes, space-padded)
+    std::string embedded_format(reinterpret_cast<const char*>(msg.data.data() + 20), 8);
+
+    spdlog::debug("Stripped MQRFH2 header ({} bytes), PCF data starts at offset {}, embedded format: '{}'",
+                  struc_length, struc_length, embedded_format);
+
+    // Trim data to start after the MQRFH2 header
+    msg.data.erase(msg.data.begin(), msg.data.begin() + struc_length);
+    msg.format = embedded_format;
+}
+
 // Helper to check if a queue name matches an HLQ pattern
 static bool matches_hlq_pattern(const std::string& queue_name, const std::string& pattern) {
     if (pattern == "*") return true;
@@ -40,9 +70,7 @@ bool queue_matches_exclusion(const std::string& queue_name,
 MQClient::MQClient(const MQConfig& config) : config_(config) {}
 
 MQClient::~MQClient() {
-    if (connected_) {
-        try { disconnect(); } catch (...) {}
-    }
+    try { disconnect(); } catch (...) {}
 }
 
 void MQClient::connect() {
@@ -99,37 +127,32 @@ void MQClient::connect() {
 }
 
 void MQClient::disconnect() {
-    if (!connected_) return;
+    // Always attempt cleanup even if connected_ is false (e.g. after connection broken).
+    // MQ API calls on a broken connection will fail harmlessly with RC=2009.
+    bool was_connected = connected_;
 
-    spdlog::info("Disconnecting from IBM MQ");
+    if (was_connected)
+        spdlog::info("Disconnecting from IBM MQ");
+    else if (!subscriptions_.empty() || stats_open_ || acct_open_)
+        spdlog::info("Cleaning up MQ handles after broken connection");
+    else
+        return; // Nothing to clean up
 
     unsubscribe_all();
 
-    // Delete the dynamic reply queue (EXPORTER.*) on disconnect
-    if (reply_open_) {
-        MQLONG cc = 0, rc = 0;
-        MQCLOSE(hconn_, &reply_queue_, MQCO_DELETE_PURGE, &cc, &rc);
-        if (cc == MQCC_FAILED)
-            spdlog::warn("Failed to delete reply queue '{}' (RC={})", reply_queue_name_, rc);
-        else
-            spdlog::info("Deleted reply queue '{}'", reply_queue_name_);
-        reply_queue_ = 0;
-    }
     if (stats_open_) close_queue(stats_queue_);
     if (acct_open_)  close_queue(acct_queue_);
 
     MQLONG cc = 0, rc = 0;
     MQDISC(&hconn_, &cc, &rc);
 
-    if (cc == MQCC_FAILED) {
+    if (cc == MQCC_FAILED && was_connected) {
         spdlog::error("Error disconnecting from queue manager (RC={})", rc);
     }
 
     connected_ = false;
     stats_open_ = false;
     acct_open_ = false;
-    reply_open_ = false;
-    reply_queue_name_.clear();
     spdlog::info("Disconnected from IBM MQ");
 }
 
@@ -374,88 +397,47 @@ std::vector<HandleInfo> MQClient::get_queue_handles(const std::string& queue_nam
     return {};
 }
 
-// --- Reusable reply queue for PCF commands ---
-
-void MQClient::ensure_reply_queue() {
-    if (reply_open_) return;
-
-    try {
-        reply_queue_ = open_queue("SYSTEM.DEFAULT.MODEL.QUEUE",
-                                  MQOO_INPUT_EXCLUSIVE, "EXPORTER.*", reply_queue_name_);
-    } catch (const std::exception& e) {
-        spdlog::error("Failed to create reply queue: {}", e.what());
-        return;
-    }
-
-    if (reply_queue_name_.empty() || reply_queue_name_ == "SYSTEM.DEFAULT.MODEL.QUEUE") {
-        close_queue(reply_queue_);
-        return;
-    }
-
-    reply_open_ = true;
-    spdlog::info("Created reusable reply queue: {}", reply_queue_name_);
-}
-
-void MQClient::drain_reply_queue() {
-    if (!reply_open_) return;
-
-    // Clear any stale messages from the reply queue before sending a new command
-    constexpr size_t BUF_SIZE = 4 * 1024;
-    std::vector<uint8_t> buf(BUF_SIZE);
-    int drained = 0;
-
-    for (int i = 0; i < 1000; ++i) {
-        MQMD md = {MQMD_DEFAULT};
-        MQGMO gmo = {MQGMO_DEFAULT};
-        gmo.Options = MQGMO_NO_WAIT;
-
-        MQLONG datalen = 0, cc = 0, rc = 0;
-        MQGET(hconn_, reply_queue_, &md, &gmo,
-              static_cast<MQLONG>(buf.size()),
-              buf.data(), &datalen, &cc, &rc);
-
-        if (cc == MQCC_FAILED) break;
-        ++drained;
-    }
-
-    if (drained > 0)
-        spdlog::debug("Drained {} stale messages from reply queue", drained);
-}
-
-// --- Reusable PCF command helper ---
+// --- PCF command helper (creates a fresh reply queue per command) ---
 
 std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<uint8_t>& cmd) {
     std::vector<std::vector<uint8_t>> responses;
     if (!connected_) return responses;
 
-    // Ensure we have a reusable reply queue
-    ensure_reply_queue();
-    if (!reply_open_) {
-        spdlog::error("No reply queue available for PCF command");
+    // Create a fresh dynamic reply queue for this command
+    MQHOBJ reply_hobj = 0;
+    std::string reply_name;
+    try {
+        reply_hobj = open_queue("SYSTEM.DEFAULT.MODEL.QUEUE",
+                                MQOO_INPUT_EXCLUSIVE, "EXPORTER.*", reply_name);
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to create reply queue: {}", e.what());
         return responses;
     }
 
-    // Drain any stale messages before sending
-    drain_reply_queue();
+    if (reply_name.empty() || reply_name == "SYSTEM.DEFAULT.MODEL.QUEUE") {
+        spdlog::error("Dynamic reply queue creation returned unexpected name");
+        MQLONG cc2 = 0, rc2 = 0;
+        MQCLOSE(hconn_, &reply_hobj, MQCO_DELETE_PURGE, &cc2, &rc2);
+        return responses;
+    }
+
+    spdlog::debug("Created temp reply queue: {}", reply_name);
 
     // Open command queue and send
     MQHOBJ cmd_hobj = 0;
     try {
         cmd_hobj = open_queue("SYSTEM.ADMIN.COMMAND.QUEUE", MQOO_OUTPUT);
     } catch (...) {
+        // Clean up reply queue before returning
+        MQLONG cc2 = 0, rc2 = 0;
+        MQCLOSE(hconn_, &reply_hobj, MQCO_DELETE_PURGE, &cc2, &rc2);
         return responses;
     }
 
     MQMD md = {MQMD_DEFAULT};
     std::memcpy(md.Format, "MQADMIN ", sizeof(md.Format));
-    std::strncpy(md.ReplyToQ, reply_queue_name_.c_str(), sizeof(md.ReplyToQ) - 1);
+    std::strncpy(md.ReplyToQ, reply_name.c_str(), sizeof(md.ReplyToQ) - 1);
     md.MsgType = MQMT_REQUEST;
-
-    // Use a unique correlation ID per command
-    static uint32_t seq = 0;
-    ++seq;
-    std::memset(md.CorrelId, 0, sizeof(md.CorrelId));
-    std::memcpy(md.CorrelId, &seq, sizeof(seq));
 
     MQPMO pmo = {MQPMO_DEFAULT};
     pmo.Options = MQPMO_NONE;
@@ -468,6 +450,8 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
 
     if (cc == MQCC_FAILED) {
         spdlog::debug("Failed to send PCF command (RC={})", rc);
+        MQLONG cc2 = 0, rc2 = 0;
+        MQCLOSE(hconn_, &reply_hobj, MQCO_DELETE_PURGE, &cc2, &rc2);
         return responses;
     }
 
@@ -482,7 +466,7 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
         gmo.WaitInterval = 5000;
 
         MQLONG datalen = 0;
-        MQGET(hconn_, reply_queue_, &resp_md, &gmo,
+        MQGET(hconn_, reply_hobj, &resp_md, &gmo,
               static_cast<MQLONG>(resp_buf.size()),
               resp_buf.data(), &datalen, &cc, &rc);
 
@@ -498,6 +482,14 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
             if (control == 1) break; // MQCFC_LAST
         }
     }
+
+    // Delete the dynamic reply queue immediately after use
+    MQLONG cc2 = 0, rc2 = 0;
+    MQCLOSE(hconn_, &reply_hobj, MQCO_DELETE_PURGE, &cc2, &rc2);
+    if (cc2 == MQCC_FAILED)
+        spdlog::warn("Failed to delete reply queue '{}' (RC={})", reply_name, rc2);
+    else
+        spdlog::debug("Deleted temp reply queue: {}", reply_name);
 
     spdlog::debug("Received {} PCF response(s)", responses.size());
     return responses;
@@ -576,6 +568,12 @@ std::vector<UsagePSDetails> MQClient::get_usage_ps_status() {
     auto cmd = PCFInquiry::build_inquire_usage_cmd(2); // PS
     auto responses = send_pcf_command(cmd);
     return PCFInquiry::parse_usage_ps_response(responses);
+}
+
+std::vector<QueueOnlineStatus> MQClient::get_queue_online_status(const std::string& queue_name) {
+    auto cmd = PCFInquiry::build_inquire_q_status_online_cmd(queue_name);
+    auto responses = send_pcf_command(cmd);
+    return PCFInquiry::parse_queue_online_status_response(responses);
 }
 
 bool MQClient::reset_queue_stats(const std::string& queue_name) {
@@ -661,6 +659,10 @@ std::vector<MQMessage> MQClient::receive_publications() {
             msg.type = "publication";
             msg.msg_type = md.MsgType;
             msg.format = std::string(md.Format, sizeof(md.Format));
+
+            // Strip MQRFH2 header if present (managed subscriptions wrap PCF in MQRFH2)
+            strip_mqrfh2(msg);
+
             messages.push_back(std::move(msg));
         }
     }
@@ -733,19 +735,54 @@ std::optional<MQMessage> MQClient::subscribe_and_get(const std::string& topic_st
     msg.msg_type = md.MsgType;
     msg.format = std::string(md.Format, sizeof(md.Format));
 
-    spdlog::debug("Got retained message from '{}', size={}", topic_string, datalen);
+    // Strip MQRFH2 header if present (managed subscriptions wrap PCF in MQRFH2)
+    strip_mqrfh2(msg);
+
+    spdlog::debug("Got retained message from '{}', size={}", topic_string, msg.data.size());
     return msg;
 }
 
 void MQClient::unsubscribe_all() {
+    // Drain and close each managed subscription.
+    // Managed destination queues are only auto-deleted by the QM when they have
+    // no remaining messages. We must drain unread publications before closing.
+    constexpr size_t DRAIN_BUF_SIZE = 4 * 1024;
+    std::vector<uint8_t> drain_buf(DRAIN_BUF_SIZE);
+
     for (auto& sub : subscriptions_) {
         MQLONG cc = 0, rc = 0;
-        // Remove the subscription explicitly to trigger managed destination cleanup
+
+        // 1. Drain all remaining messages from the managed destination queue.
+        //    Publications accumulate between collection cycles; if not drained,
+        //    the QM will keep the managed queue alive after unsubscribe.
+        if (sub.hobj != 0) {
+            int drained = 0;
+            for (int i = 0; i < 10000; ++i) {
+                MQMD md = {MQMD_DEFAULT};
+                MQGMO gmo = {MQGMO_DEFAULT};
+                gmo.Options = MQGMO_NO_WAIT;
+                MQLONG datalen = 0;
+                MQGET(hconn_, sub.hobj, &md, &gmo,
+                      static_cast<MQLONG>(drain_buf.size()),
+                      drain_buf.data(), &datalen, &cc, &rc);
+                if (cc == MQCC_FAILED) break;
+                ++drained;
+            }
+            if (drained > 0)
+                spdlog::debug("Drained {} messages from managed destination before unsubscribe", drained);
+        }
+
+        // 2. Remove the subscription (no more publications will arrive)
         if (sub.hsub != 0) {
             MQCLOSE(hconn_, &sub.hsub, MQCO_REMOVE_SUB, &cc, &rc);
             if (cc == MQCC_FAILED)
                 spdlog::debug("Failed to remove subscription (RC={})", rc);
         }
+
+        // 3. Close the managed destination queue handle.
+        //    For temporary dynamic queues (which managed destinations are),
+        //    MQCO_NONE acts as MQCO_DELETE_PURGE — the queue is deleted.
+        //    Since we drained messages above, deletion should succeed cleanly.
         if (sub.hobj != 0) {
             MQCLOSE(hconn_, &sub.hobj, MQCO_NONE, &cc, &rc);
             if (cc == MQCC_FAILED)

@@ -1,6 +1,9 @@
 #include "ibmmq_exporter/metrics_collector.h"
 
 #include <chrono>
+#include <ctime>
+#include <iomanip>
+#include <sstream>
 #include <spdlog/spdlog.h>
 
 namespace ibmmq_exporter {
@@ -28,7 +31,7 @@ void MetricsCollector::init_metrics() {
     auto prefix = ns + (sub.empty() ? "" : "_" + sub);
 
     // Queue metrics
-    queue_depth_ = &prometheus::BuildGauge().Name(prefix + "_queue_depth_current")
+    queue_depth_ = &prometheus::BuildGauge().Name(prefix + "_queue_depth")
         .Help("Current depth of IBM MQ queue").Register(*registry_);
     queue_high_depth_ = &prometheus::BuildGauge().Name(prefix + "_queue_depth_high")
         .Help("High water mark of IBM MQ queue depth").Register(*registry_);
@@ -46,6 +49,20 @@ void MetricsCollector::init_metrics() {
         .Help("Whether IBM MQ queue has active writers (1=yes, 0=no)").Register(*registry_);
     queue_process_ = &prometheus::BuildGauge().Name(prefix + "_queue_process")
         .Help("Processes associated with a queue").Register(*registry_);
+    queue_max_depth_ = &prometheus::BuildGauge().Name(prefix + "_queue_attribute_max_depth")
+        .Help("Maximum queue depth attribute").Register(*registry_);
+    queue_oldest_msg_age_ = &prometheus::BuildGauge().Name(prefix + "_queue_oldest_message_age")
+        .Help("Age of oldest message on queue in seconds").Register(*registry_);
+    queue_uncommitted_msgs_ = &prometheus::BuildGauge().Name(prefix + "_queue_uncommitted_messages")
+        .Help("Number of uncommitted messages on queue").Register(*registry_);
+    queue_qtime_short_ = &prometheus::BuildGauge().Name(prefix + "_queue_qtime_short")
+        .Help("Queue time indicator (short sample) microseconds").Register(*registry_);
+    queue_qtime_long_ = &prometheus::BuildGauge().Name(prefix + "_queue_qtime_long")
+        .Help("Queue time indicator (long sample) microseconds").Register(*registry_);
+    queue_qfile_current_size_ = &prometheus::BuildGauge().Name(prefix + "_queue_qfile_current_size")
+        .Help("Current queue file size in bytes").Register(*registry_);
+    queue_qfile_max_size_ = &prometheus::BuildGauge().Name(prefix + "_queue_qfile_max_size")
+        .Help("Maximum queue file size in bytes").Register(*registry_);
 
     // Per-queue per-app metrics
     queue_app_puts_ = &prometheus::BuildGauge().Name(prefix + "_queue_app_puts_total")
@@ -76,17 +93,43 @@ void MetricsCollector::init_metrics() {
     // Channel status metrics (PCF inquiry)
     channel_status_ = &prometheus::BuildGauge().Name(prefix + "_channel_status")
         .Help("Channel status from PCF inquiry").Register(*registry_);
-    channel_status_msgs_ = &prometheus::BuildGauge().Name(prefix + "_channel_status_msgs")
+    channel_status_msgs_ = &prometheus::BuildGauge().Name(prefix + "_channel_msgs")
         .Help("Messages through channel from PCF status").Register(*registry_);
     channel_bytes_sent_ = &prometheus::BuildGauge().Name(prefix + "_channel_bytes_sent")
         .Help("Bytes sent through channel from PCF status").Register(*registry_);
     channel_bytes_received_ = &prometheus::BuildGauge().Name(prefix + "_channel_bytes_received")
         .Help("Bytes received through channel from PCF status").Register(*registry_);
+    channel_buffers_sent_ = &prometheus::BuildGauge().Name(prefix + "_channel_buffers_sent")
+        .Help("Buffers sent through channel").Register(*registry_);
+    channel_buffers_received_ = &prometheus::BuildGauge().Name(prefix + "_channel_buffers_received")
+        .Help("Buffers received through channel").Register(*registry_);
+    channel_substate_ = &prometheus::BuildGauge().Name(prefix + "_channel_substate")
+        .Help("Channel substate").Register(*registry_);
+    channel_instance_type_ = &prometheus::BuildGauge().Name(prefix + "_channel_instance_type")
+        .Help("Channel instance type").Register(*registry_);
+    channel_nettime_short_ = &prometheus::BuildGauge().Name(prefix + "_channel_nettime_short")
+        .Help("Network time indicator (short sample) microseconds").Register(*registry_);
+    channel_nettime_long_ = &prometheus::BuildGauge().Name(prefix + "_channel_nettime_long")
+        .Help("Network time indicator (long sample) microseconds").Register(*registry_);
+    channel_xmitq_time_short_ = &prometheus::BuildGauge().Name(prefix + "_channel_xmitq_time_short")
+        .Help("Transmission queue time indicator (short sample) microseconds").Register(*registry_);
+    channel_xmitq_time_long_ = &prometheus::BuildGauge().Name(prefix + "_channel_xmitq_time_long")
+        .Help("Transmission queue time indicator (long sample) microseconds").Register(*registry_);
+    channel_batch_size_short_ = &prometheus::BuildGauge().Name(prefix + "_channel_batch_size_short")
+        .Help("Batch size indicator (short sample)").Register(*registry_);
+    channel_batch_size_long_ = &prometheus::BuildGauge().Name(prefix + "_channel_batch_size_long")
+        .Help("Batch size indicator (long sample)").Register(*registry_);
+    channel_max_instc_ = &prometheus::BuildGauge().Name(prefix + "_channel_max_instc")
+        .Help("Maximum instances for channel").Register(*registry_);
+    channel_cur_instc_ = &prometheus::BuildGauge().Name(prefix + "_channel_cur_instc")
+        .Help("Current sharing conversations for channel").Register(*registry_);
+    channel_status_squash_ = &prometheus::BuildGauge().Name(prefix + "_channel_status_squash")
+        .Help("Simplified channel status (0=OK, 1=transitioning, 2=stopped, 3=unknown)").Register(*registry_);
 
     // Topic status metrics
-    topic_pub_count_ = &prometheus::BuildGauge().Name(prefix + "_topic_pub_count")
+    topic_pub_count_ = &prometheus::BuildGauge().Name(prefix + "_topic_publisher_count")
         .Help("Number of publishers on topic").Register(*registry_);
-    topic_sub_count_ = &prometheus::BuildGauge().Name(prefix + "_topic_sub_count")
+    topic_sub_count_ = &prometheus::BuildGauge().Name(prefix + "_topic_subscriber_count")
         .Help("Number of subscribers on topic").Register(*registry_);
 
     // Subscription status metrics
@@ -94,18 +137,26 @@ void MetricsCollector::init_metrics() {
         .Help("Whether subscription is durable").Register(*registry_);
     sub_type_ = &prometheus::BuildGauge().Name(prefix + "_subscription_type")
         .Help("Subscription type").Register(*registry_);
+    sub_message_count_ = &prometheus::BuildGauge().Name(prefix + "_subscription_messages_received")
+        .Help("Messages received by subscription").Register(*registry_);
 
     // QM status metrics
     qmgr_status_ = &prometheus::BuildGauge().Name(prefix + "_qmgr_status")
         .Help("Queue manager status").Register(*registry_);
     qmgr_connection_count_ = &prometheus::BuildGauge().Name(prefix + "_qmgr_connection_count")
         .Help("Queue manager connection count").Register(*registry_);
-    qmgr_chinit_status_ = &prometheus::BuildGauge().Name(prefix + "_qmgr_chinit_status")
+    qmgr_chinit_status_ = &prometheus::BuildGauge().Name(prefix + "_qmgr_channel_initiator_status")
         .Help("Channel initiator status").Register(*registry_);
+    qmgr_cmd_server_status_ = &prometheus::BuildGauge().Name(prefix + "_qmgr_command_server_status")
+        .Help("Command server status").Register(*registry_);
+    qmgr_uptime_ = &prometheus::BuildGauge().Name(prefix + "_qmgr_uptime")
+        .Help("Queue manager uptime in seconds").Register(*registry_);
 
     // Cluster metrics
     cluster_qmgr_status_ = &prometheus::BuildGauge().Name(prefix + "_cluster_qmgr_status")
         .Help("Cluster queue manager status").Register(*registry_);
+    cluster_qmgr_suspend_ = &prometheus::BuildGauge().Name(prefix + "_cluster_qmgr_suspend")
+        .Help("Whether queue manager is suspended from cluster").Register(*registry_);
 
     // z/OS Buffer Pool metrics
     usage_bp_free_ = &prometheus::BuildGauge().Name(prefix + "_usage_bp_free_buffers")
@@ -172,27 +223,50 @@ void MetricsCollector::collect_metrics() {
     auto acct_msgs  = collect_messages("accounting");
 
     update_metrics_from_messages(stats_msgs, acct_msgs);
-    collect_and_update_queue_metrics();
-    collect_and_update_handle_metrics();
 
-    // Extended PCF status collection
+    // Cache queue list once per cycle to avoid redundant PCF discovery
+    cached_queues_ = get_queues_to_monitor();
+
+    try { collect_and_update_queue_metrics(); }
+    catch (const std::exception& e) { spdlog::error("Queue metrics failed: {}", e.what()); }
+
+    try { collect_and_update_handle_metrics(); }
+    catch (const std::exception& e) { spdlog::error("Handle metrics failed: {}", e.what()); }
+
+    // Extended PCF status collection — each wrapped so one failure doesn't block others
     if (config_.collector.use_status && mq_client_->is_connected()) {
-        collect_qmgr_status();
-        collect_channel_status();
-        collect_topic_status();
-        collect_sub_status();
-        collect_cluster_status();
+        try { collect_qmgr_status(); }
+        catch (const std::exception& e) { spdlog::error("QMgr status failed: {}", e.what()); }
+
+        try { collect_channel_status(); }
+        catch (const std::exception& e) { spdlog::error("Channel status failed: {}", e.what()); }
+
+        try { collect_topic_status(); }
+        catch (const std::exception& e) { spdlog::error("Topic status failed: {}", e.what()); }
+
+        try { collect_sub_status(); }
+        catch (const std::exception& e) { spdlog::error("Sub status failed: {}", e.what()); }
+
+        try { collect_cluster_status(); }
+        catch (const std::exception& e) { spdlog::error("Cluster status failed: {}", e.what()); }
+
+        try { collect_queue_online_status(); }
+        catch (const std::exception& e) { spdlog::error("Queue online status failed: {}", e.what()); }
 
         // z/OS usage only on z/OS platform
         if (mq_client_->get_platform() == platform::ZOS) {
-            collect_usage_status();
+            try { collect_usage_status(); }
+            catch (const std::exception& e) { spdlog::error("Usage status failed: {}", e.what()); }
         }
     }
 
     // Publication-based metrics from $SYS topics
     if (resource_monitor_ && mq_client_->is_connected()) {
-        collect_publication_metrics();
+        try { collect_publication_metrics(); }
+        catch (const std::exception& e) { spdlog::error("Publication metrics failed: {}", e.what()); }
     }
+
+    cached_queues_.clear();
 
     set_baseline_metrics(static_cast<int>(stats_msgs.size()),
                          static_cast<int>(acct_msgs.size()));
@@ -401,17 +475,18 @@ void MetricsCollector::process_accounting_message(const MQMessage& msg) {
 void MetricsCollector::collect_and_update_queue_metrics() {
     if (!mq_client_->is_connected()) return;
 
-    auto queues = get_queues_to_monitor();
     auto plat = mq_client_->get_platform_string();
 
-    for (const auto& qname : queues) {
-        auto stats = mq_client_->get_queue_stats(qname);
-        if (!stats) continue;
+    for (const auto& qname : cached_queues_) {
+        auto info = mq_client_->get_queue_info(qname);
+        if (!info) continue;
 
-        queue_depth_->Add(add_meta_labels({{"queue_manager", config_.mq.queue_manager},
-                           {"queue_name", stats->queue_name},
-                           {"platform", plat}}))
-            .Set(stats->current_depth);
+        auto labels = add_meta_labels({{"queue_manager", config_.mq.queue_manager},
+                                       {"queue_name", info->queue_name},
+                                       {"platform", plat}});
+
+        queue_depth_->Add(labels).Set(info->current_depth);
+        queue_max_depth_->Add(labels).Set(info->max_queue_depth);
     }
 }
 
@@ -454,11 +529,9 @@ std::vector<std::string> MetricsCollector::get_queues_to_monitor() {
 
 void MetricsCollector::collect_and_update_handle_metrics() {
     if (!mq_client_->is_connected()) return;
+    if (cached_queues_.empty()) return;
 
-    auto queues = get_queues_to_monitor();
-    if (queues.empty()) return;
-
-    for (const auto& qname : queues) {
+    for (const auto& qname : cached_queues_) {
         auto info = mq_client_->get_queue_info(qname);
         if (!info) continue;
 
@@ -483,6 +556,34 @@ void MetricsCollector::collect_and_update_handle_metrics() {
 
 // --- Extended PCF status collection ---
 
+void MetricsCollector::collect_queue_online_status() {
+    if (!mq_client_->is_connected()) return;
+    if (cached_queues_.empty()) return;
+
+    auto plat = mq_client_->get_platform_string();
+
+    // Use wildcard query to get all queue statuses in one PCF command
+    auto statuses = mq_client_->get_queue_online_status("*");
+
+    // Build a set of monitored queue names for fast lookup
+    std::set<std::string> monitored(cached_queues_.begin(), cached_queues_.end());
+
+    for (const auto& qs : statuses) {
+        if (monitored.find(qs.queue_name) == monitored.end()) continue;
+
+        auto labels = add_meta_labels({{"queue_manager", config_.mq.queue_manager},
+                                       {"queue_name", qs.queue_name},
+                                       {"platform", plat}});
+
+        queue_oldest_msg_age_->Add(labels).Set(qs.oldest_msg_age);
+        queue_uncommitted_msgs_->Add(labels).Set(qs.uncommitted_msgs);
+        queue_qtime_short_->Add(labels).Set(qs.qtime_short);
+        queue_qtime_long_->Add(labels).Set(qs.qtime_long);
+        queue_qfile_current_size_->Add(labels).Set(qs.cur_q_file_size);
+        queue_qfile_max_size_->Add(labels).Set(qs.cur_max_file_size);
+    }
+}
+
 void MetricsCollector::collect_channel_status() {
     auto patterns = config_.collector.monitored_channels;
     if (patterns.empty()) patterns.push_back("*");
@@ -506,6 +607,35 @@ void MetricsCollector::collect_channel_status() {
             channel_status_msgs_->Add(labels).Set(ch.msgs);
             channel_bytes_sent_->Add(labels).Set(static_cast<double>(ch.bytes_sent));
             channel_bytes_received_->Add(labels).Set(static_cast<double>(ch.bytes_received));
+            channel_buffers_sent_->Add(labels).Set(ch.buffers_sent);
+            channel_buffers_received_->Add(labels).Set(ch.buffers_received);
+            channel_substate_->Add(labels).Set(ch.substate);
+            channel_instance_type_->Add(labels).Set(ch.instance_type);
+            channel_nettime_short_->Add(labels).Set(ch.nettime_short);
+            channel_nettime_long_->Add(labels).Set(ch.nettime_long);
+            channel_xmitq_time_short_->Add(labels).Set(ch.xmitq_time_short);
+            channel_xmitq_time_long_->Add(labels).Set(ch.xmitq_time_long);
+            channel_batch_size_short_->Add(labels).Set(ch.batch_size_short);
+            channel_batch_size_long_->Add(labels).Set(ch.batch_size_long);
+            channel_max_instc_->Add(labels).Set(ch.max_instances);
+            channel_cur_instc_->Add(labels).Set(ch.cur_sharing_convs);
+
+            // Status squash: 0=OK(running/inactive), 1=transitioning, 2=stopped, 3=unknown
+            int squash = 3;
+            switch (ch.status) {
+            case 0: squash = 0; break;  // inactive
+            case 3: squash = 0; break;  // running
+            case 1: squash = 1; break;  // binding
+            case 2: squash = 1; break;  // starting
+            case 4: squash = 2; break;  // stopping
+            case 5: squash = 2; break;  // retrying
+            case 6: squash = 2; break;  // stopped
+            case 7: squash = 1; break;  // requesting
+            case 8: squash = 2; break;  // paused
+            case 13: squash = 1; break; // initializing
+            default: squash = 3; break;
+            }
+            channel_status_squash_->Add(labels).Set(squash);
         }
     }
 }
@@ -550,6 +680,7 @@ void MetricsCollector::collect_sub_status() {
 
             sub_durable_->Add(labels).Set(s.durable);
             sub_type_->Add(labels).Set(s.sub_type);
+            sub_message_count_->Add(labels).Set(s.message_count);
         }
     }
 }
@@ -567,6 +698,23 @@ void MetricsCollector::collect_qmgr_status() {
         qmgr_status_->Add(labels).Set(status->status);
         qmgr_connection_count_->Add(labels).Set(status->connection_count);
         qmgr_chinit_status_->Add(labels).Set(status->chinit_status);
+        qmgr_cmd_server_status_->Add(labels).Set(status->cmd_server_status);
+
+        // Compute uptime from start_date (YYYY-MM-DD) and start_time (HH.MM.SS)
+        if (!status->start_date.empty() && !status->start_time.empty()) {
+            std::tm tm_start = {};
+            std::string dt_str = status->start_date + " " + status->start_time;
+            std::istringstream iss(dt_str);
+            iss >> std::get_time(&tm_start, "%Y-%m-%d %H.%M.%S");
+            if (!iss.fail()) {
+                auto start_epoch = std::mktime(&tm_start);
+                if (start_epoch >= 0) {
+                    auto now_epoch = std::chrono::system_clock::to_time_t(std::chrono::system_clock::now());
+                    double uptime = std::difftime(now_epoch, start_epoch);
+                    if (uptime > 0) qmgr_uptime_->Add(labels).Set(uptime);
+                }
+            }
+        }
     } else {
         // Report disconnected status
         auto labels = add_meta_labels({
@@ -588,6 +736,7 @@ void MetricsCollector::collect_cluster_status() {
             {"cluster", cl.cluster_name},
             {"qmtype", std::to_string(cl.qm_type)}});
         cluster_qmgr_status_->Add(labels).Set(cl.status);
+        cluster_qmgr_suspend_->Add(labels).Set(cl.suspend);
     }
 }
 

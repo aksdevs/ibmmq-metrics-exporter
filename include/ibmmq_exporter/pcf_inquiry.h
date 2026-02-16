@@ -31,6 +31,22 @@ struct ChannelStatusDetails {
     int32_t     batches{0};
     int32_t     substate{0};
     int32_t     instance_type{0};
+    int32_t     buffers_sent{0};         // MQIACH_BUFFERS_SENT (1538)
+    int32_t     buffers_received{0};     // MQIACH_BUFFERS_RCVD (1539)
+    int32_t     cur_sharing_convs{0};    // MQIACH_CURRENT_SHARING_CONVS (1585)
+    int32_t     max_instances{0};        // MQIACH_MAX_INSTANCES (1618)
+    int32_t     max_insts_per_client{0}; // MQIACH_MAX_INSTS_PER_CLIENT (1619)
+    // INTEGER_LIST indicators [short, long]
+    int32_t     nettime_short{0};        // MQIACH_NETWORK_TIME_INDICATOR[0] (1605)
+    int32_t     nettime_long{0};         // MQIACH_NETWORK_TIME_INDICATOR[1]
+    int32_t     xmitq_time_short{0};     // MQIACH_XMITQ_TIME_INDICATOR[0] (1604)
+    int32_t     xmitq_time_long{0};      // MQIACH_XMITQ_TIME_INDICATOR[1]
+    int32_t     batch_size_short{0};     // MQIACH_BATCH_SIZE_INDICATOR[0] (1607)
+    int32_t     batch_size_long{0};      // MQIACH_BATCH_SIZE_INDICATOR[1]
+    std::string start_date;              // MQCACH_CHANNEL_START_DATE (3527)
+    std::string start_time;              // MQCACH_CHANNEL_START_TIME (3528)
+    std::string last_msg_date;           // MQCACH_LAST_MSG_DATE (3529)
+    std::string last_msg_time;           // MQCACH_LAST_MSG_TIME (3530)
 };
 
 struct TopicStatusDetails {
@@ -48,6 +64,9 @@ struct SubStatusDetails {
     std::string destination;
     int32_t     sub_type{0};
     int32_t     durable{0};
+    int32_t     message_count{0};    // MQIACF_MESSAGE_COUNT (1290)
+    std::string last_msg_date;       // MQCACF_LAST_MSG_DATE (3168)
+    std::string last_msg_time;       // MQCACF_LAST_MSG_TIME (3167)
 };
 
 struct QMgrStatusDetails {
@@ -66,6 +85,7 @@ struct ClusterQMgrDetails {
     std::string qmgr_name;
     int32_t     qm_type{0};
     int32_t     status{0};
+    int32_t     suspend{0};          // MQIACF_SUSPEND (1087)
 };
 
 struct UsageBPDetails {
@@ -85,6 +105,20 @@ struct UsagePSDetails {
     int32_t nonpersist_pages{0};
     int32_t restart_pages{0};
     int32_t expand_count{0};
+};
+
+struct QueueOnlineStatus {
+    std::string queue_name;
+    int32_t  oldest_msg_age{0};      // MQIACF_OLDEST_MSG_AGE (1227)
+    int32_t  uncommitted_msgs{0};    // MQIACF_UNCOMMITTED_MSGS (1027)
+    int32_t  qtime_short{0};         // MQIACF_Q_TIME_INDICATOR[0] (1226)
+    int32_t  qtime_long{0};          // MQIACF_Q_TIME_INDICATOR[1]
+    int32_t  cur_q_file_size{0};     // MQIACF_CUR_Q_FILE_SIZE (1437)
+    int32_t  cur_max_file_size{0};   // MQIACF_CUR_MAX_FILE_SIZE (1438)
+    std::string last_put_date;       // MQCACF_LAST_PUT_DATE (3128)
+    std::string last_put_time;       // MQCACF_LAST_PUT_TIME (3129)
+    std::string last_get_date;       // MQCACF_LAST_GET_DATE (3130)
+    std::string last_get_time;       // MQCACF_LAST_GET_TIME (3131)
 };
 
 class PCFInquiry {
@@ -113,6 +147,9 @@ public:
     // Build PCF INQUIRE_USAGE command (usage_type: 1=BP, 2=PS)
     static std::vector<uint8_t> build_inquire_usage_cmd(int32_t usage_type);
 
+    // Build PCF INQUIRE_Q_STATUS (online mode) command
+    static std::vector<uint8_t> build_inquire_q_status_online_cmd(const std::string& queue_name);
+
     // Build PCF RESET_Q_STATS command
     static std::vector<uint8_t> build_reset_q_stats_cmd(const std::string& queue_name);
 
@@ -139,6 +176,9 @@ public:
         const std::vector<std::vector<uint8_t>>& responses);
 
     static std::vector<UsagePSDetails> parse_usage_ps_response(
+        const std::vector<std::vector<uint8_t>>& responses);
+
+    static std::vector<QueueOnlineStatus> parse_queue_online_status_response(
         const std::vector<std::vector<uint8_t>>& responses);
 
 private:

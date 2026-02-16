@@ -165,6 +165,16 @@ void Collector::stop() {
 
     http_server_->stop();
 
+    // Close resource monitor BEFORE disconnecting MQClient.
+    // This clears internal state so the metrics collector won't try to use it.
+    // The actual managed subscription cleanup (draining messages + unsubscribe)
+    // happens in MQClient::disconnect() → unsubscribe_all().
+    if (resource_monitor_) {
+        metrics_collector_->set_resource_monitor(nullptr);
+        resource_monitor_->close();
+        resource_monitor_.reset();
+    }
+
     try {
         mq_client_->disconnect();
     } catch (const std::exception& e) {

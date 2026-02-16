@@ -100,6 +100,7 @@ public:
     std::vector<ClusterQMgrDetails>   get_cluster_status();
     std::vector<UsageBPDetails>       get_usage_bp_status();
     std::vector<UsagePSDetails>       get_usage_ps_status();
+    std::vector<QueueOnlineStatus>    get_queue_online_status(const std::string& queue_name);
     bool reset_queue_stats(const std::string& queue_name);
 
     // Queue discovery via PCF
@@ -123,12 +124,9 @@ private:
     MQHCONN  hconn_{0};
     MQHOBJ   stats_queue_{0};
     MQHOBJ   acct_queue_{0};
-    MQHOBJ   reply_queue_{0};       // Reusable reply queue for all PCF commands
-    std::string reply_queue_name_;  // Resolved name of the reply queue
     bool     connected_{false};
     bool     stats_open_{false};
     bool     acct_open_{false};
-    bool     reply_open_{false};
     int32_t  platform_{0};
 
     // Subscription handles (real MQ uses MQHOBJ for both)
@@ -143,12 +141,8 @@ private:
                       const std::string& dynamic_q_name, std::string& resolved_name);
     void   close_queue(MQHOBJ& hobj);
 
-    // Reusable PCF command send/receive via reply queue
+    // PCF command send/receive (creates a fresh reply queue per command)
     std::vector<std::vector<uint8_t>> send_pcf_command(const std::vector<uint8_t>& cmd);
-
-    // Reply queue lifecycle (one queue reused for all PCF commands)
-    void ensure_reply_queue();
-    void drain_reply_queue();
 
     // Detect remote QM platform via MQINQ
     void detect_platform();
