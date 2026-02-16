@@ -55,6 +55,24 @@ void Collector::setup_after_connect() {
         }
     }
 
+    // Set up resource monitor for $SYS topic publication metrics
+    if (config_.collector.use_publications) {
+        try {
+            resource_monitor_ = std::make_unique<ResourceMonitor>(*mq_client_, config_.mq.queue_manager);
+            if (resource_monitor_->discover()) {
+                resource_monitor_->create_subscriptions();
+                metrics_collector_->set_resource_monitor(resource_monitor_.get());
+                spdlog::info("Resource monitor initialized with {} classes", resource_monitor_->class_count());
+            } else {
+                spdlog::warn("Resource monitor discovery failed, publication metrics disabled");
+                resource_monitor_.reset();
+            }
+        } catch (const std::exception& e) {
+            spdlog::warn("Failed to initialize resource monitor: {}", e.what());
+            resource_monitor_.reset();
+        }
+    }
+
     // Initial queue discovery
     if (!config_.collector.monitored_queues.empty()) {
         for (const auto& pattern : config_.collector.monitored_queues) {
@@ -114,6 +132,8 @@ void Collector::start() {
                 try {
                     mq_client_->disconnect();
                 } catch (...) {}
+                resource_monitor_.reset();
+                metrics_collector_->set_resource_monitor(nullptr);
                 mq_client_ = std::make_unique<MQClient>(config_.mq);
                 metrics_collector_->set_mq_client(*mq_client_);
                 spdlog::warn("Connection lost, will attempt reconnection");
