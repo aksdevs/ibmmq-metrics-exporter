@@ -55,12 +55,21 @@ void Collector::setup_after_connect() {
         }
     }
 
+    // Queue discovery (before resource monitor — per-queue publication
+    // subscriptions need the queue list)
+    if (!config_.collector.monitored_queues.empty()) {
+        for (const auto& pattern : config_.collector.monitored_queues) {
+            auto qs = mq_client_->discover_queues(pattern);
+            discovered_queues_.insert(discovered_queues_.end(), qs.begin(), qs.end());
+        }
+    }
+
     // Set up resource monitor for $SYS topic publication metrics
     if (config_.collector.use_publications) {
         try {
             resource_monitor_ = std::make_unique<ResourceMonitor>(*mq_client_, config_.mq.queue_manager);
             if (resource_monitor_->discover()) {
-                resource_monitor_->create_subscriptions();
+                resource_monitor_->create_subscriptions(discovered_queues_);
                 metrics_collector_->set_resource_monitor(resource_monitor_.get());
                 spdlog::info("Resource monitor initialized with {} classes", resource_monitor_->class_count());
             } else {
@@ -70,14 +79,6 @@ void Collector::setup_after_connect() {
         } catch (const std::exception& e) {
             spdlog::warn("Failed to initialize resource monitor: {}", e.what());
             resource_monitor_.reset();
-        }
-    }
-
-    // Initial queue discovery
-    if (!config_.collector.monitored_queues.empty()) {
-        for (const auto& pattern : config_.collector.monitored_queues) {
-            auto qs = mq_client_->discover_queues(pattern);
-            discovered_queues_.insert(discovered_queues_.end(), qs.begin(), qs.end());
         }
     }
 
