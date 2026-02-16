@@ -40,6 +40,7 @@ struct CollectorConfig {
     bool                       use_status{true};
     bool                       use_statistics{false};
     bool                       use_reset_q_stats{false};
+    bool                       use_publications{true};  // Enable $SYS topic subscription metrics (amqsrua-style)
     std::chrono::seconds       rediscover_interval{0};
 
     // Monitored object patterns

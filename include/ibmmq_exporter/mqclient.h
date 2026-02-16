@@ -110,6 +110,10 @@ public:
     std::vector<MQMessage> receive_publications();
     void unsubscribe_all();
 
+    // Subscribe to a topic, read one retained message, then close the subscription.
+    // Used for metadata discovery from $SYS topics.
+    std::optional<MQMessage> subscribe_and_get(const std::string& topic_string);
+
     // Platform detection
     int32_t get_platform() const { return platform_; }
     std::string get_platform_string() const;

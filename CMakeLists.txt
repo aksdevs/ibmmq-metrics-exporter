@@ -95,6 +95,7 @@ set(SOURCES
     src/pcf_inquiry.cpp
     src/metrics_collector.cpp
     src/collector.cpp
+    src/resource_monitor.cpp
     src/http_server.cpp
 )
 

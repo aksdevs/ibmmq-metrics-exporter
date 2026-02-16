@@ -189,6 +189,11 @@ void MetricsCollector::collect_metrics() {
         }
     }
 
+    // Publication-based metrics from $SYS topics
+    if (resource_monitor_ && mq_client_->is_connected()) {
+        collect_publication_metrics();
+    }
+
     set_baseline_metrics(static_cast<int>(stats_msgs.size()),
                          static_cast<int>(acct_msgs.size()));
 
@@ -628,6 +633,56 @@ void MetricsCollector::set_baseline_metrics(int /*stats_count*/, int /*acct_coun
                            {"channel", config_.mq.channel},
                            {"platform", mq_client_->get_platform_string()},
                            {"collector_version", "1.0.0"}})).Set(1);
+}
+
+void MetricsCollector::collect_publication_metrics() {
+    auto pubs = resource_monitor_->process_publications();
+    if (pubs.empty()) return;
+
+    const auto& ns = config_.prometheus.metrics_namespace;
+    const auto& sub = config_.prometheus.subsystem;
+    auto prefix = ns + (sub.empty() ? "" : "_" + sub);
+    auto plat = mq_client_->get_platform_string();
+
+    for (const auto& pm : pubs) {
+        if (pm.object_name.empty()) {
+            // QM-level metric (STATMQI, CPU, DISK, etc.)
+            std::string key = pm.class_name + "_" + pm.metric_name;
+            auto it = pub_qmgr_metrics_.find(key);
+            if (it == pub_qmgr_metrics_.end()) {
+                auto* family = &prometheus::BuildGauge()
+                    .Name(prefix + "_qmgr_" + pm.metric_name)
+                    .Help("QM-level resource monitor: " + pm.metric_name + " (" + pm.class_name + "/" + pm.type_name + ")")
+                    .Register(*registry_);
+                pub_qmgr_metrics_[key] = family;
+                it = pub_qmgr_metrics_.find(key);
+            }
+            it->second->Add(add_meta_labels({
+                {"qmgr", config_.mq.queue_manager},
+                {"platform", plat},
+                {"type", pm.type_name}
+            })).Set(pm.value);
+        } else {
+            // Per-queue metric (STATQ)
+            std::string key = pm.class_name + "_" + pm.metric_name;
+            auto it = pub_queue_metrics_.find(key);
+            if (it == pub_queue_metrics_.end()) {
+                auto* family = &prometheus::BuildGauge()
+                    .Name(prefix + "_queue_pub_" + pm.metric_name)
+                    .Help("Per-queue resource monitor: " + pm.metric_name + " (" + pm.class_name + "/" + pm.type_name + ")")
+                    .Register(*registry_);
+                pub_queue_metrics_[key] = family;
+                it = pub_queue_metrics_.find(key);
+            }
+            it->second->Add(add_meta_labels({
+                {"qmgr", config_.mq.queue_manager},
+                {"platform", plat},
+                {"queue", pm.object_name}
+            })).Set(pm.value);
+        }
+    }
+
+    spdlog::info("Updated {} publication-based metrics", pubs.size());
 }
 
 void MetricsCollector::reset_metrics() {

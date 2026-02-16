@@ -13,6 +13,7 @@
 #include "ibmmq_exporter/config.h"
 #include "ibmmq_exporter/mqclient.h"
 #include "ibmmq_exporter/pcf_parser.h"
+#include "ibmmq_exporter/resource_monitor.h"
 
 namespace ibmmq_exporter {
 
@@ -30,6 +31,9 @@ public:
 
     // Update MQ client reference (for reconnection)
     void set_mq_client(MQClient& client) { mq_client_ = &client; }
+
+    // Set resource monitor for $SYS publication-based metrics
+    void set_resource_monitor(ResourceMonitor* monitor) { resource_monitor_ = monitor; }
 
     std::shared_ptr<prometheus::Registry> get_registry() const { return registry_; }
 
@@ -62,14 +66,18 @@ private:
     // Update MQI statistics into Prometheus gauges
     void update_mqi_gauges(const MQIStatistics& mqi, const std::string& qmgr);
 
+    // Process publication-based metrics from ResourceMonitor
+    void collect_publication_metrics();
+
     // Metadata label helpers
     std::map<std::string, std::string> add_meta_labels(std::map<std::string, std::string> labels) const;
 
-    const Config& config_;
-    MQClient*     mq_client_;
-    PCFParser     pcf_parser_;
+    const Config&      config_;
+    MQClient*          mq_client_;
+    PCFParser          pcf_parser_;
+    ResourceMonitor*   resource_monitor_{nullptr};
     std::shared_ptr<prometheus::Registry> registry_;
-    std::mutex    mu_;
+    std::mutex         mu_;
 
     // Queue metrics
     prometheus::Family<prometheus::Gauge>* queue_depth_{nullptr};
@@ -135,6 +143,12 @@ private:
     prometheus::Family<prometheus::Gauge>* collection_info_{nullptr};
     prometheus::Family<prometheus::Gauge>* last_collection_time_{nullptr};
     prometheus::Family<prometheus::Gauge>* publications_count_{nullptr};
+
+    // Publication-based metric families (dynamically keyed by class_name + metric_name)
+    // QM-level: ibmmq_qmgr_<metric_name> with labels {qmgr, platform, type}
+    // Per-queue: ibmmq_queue_pub_<metric_name> with labels {qmgr, platform, queue}
+    std::map<std::string, prometheus::Family<prometheus::Gauge>*> pub_qmgr_metrics_;
+    std::map<std::string, prometheus::Family<prometheus::Gauge>*> pub_queue_metrics_;
 
     // Cache of process info per queue
     std::map<std::string, std::vector<ProcInfo>> queue_procs_cache_;

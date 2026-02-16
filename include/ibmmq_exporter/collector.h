@@ -10,6 +10,7 @@
 #include "ibmmq_exporter/http_server.h"
 #include "ibmmq_exporter/metrics_collector.h"
 #include "ibmmq_exporter/mqclient.h"
+#include "ibmmq_exporter/resource_monitor.h"
 
 namespace ibmmq_exporter {
 
@@ -41,6 +42,7 @@ private:
     std::shared_ptr<prometheus::Registry> registry_;
     std::unique_ptr<MetricsCollector>     metrics_collector_;
     std::unique_ptr<HTTPServer>           http_server_;
+    std::unique_ptr<ResourceMonitor>     resource_monitor_;
 
     std::atomic<bool> running_{false};
     int               cycle_count_{0};

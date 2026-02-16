@@ -58,6 +58,7 @@ Config default_config() {
     cfg.collector.use_status       = true;
     cfg.collector.use_statistics   = false;
     cfg.collector.use_reset_q_stats = false;
+    cfg.collector.use_publications  = true;
     cfg.collector.rediscover_interval = std::chrono::seconds(0);
 
     cfg.prometheus.port             = 9091;
@@ -156,6 +157,7 @@ Config load_config(const std::string& config_path) {
                 if (col["use_status"])        cfg.collector.use_status = col["use_status"].as<bool>(true);
                 if (col["use_statistics"])    cfg.collector.use_statistics = col["use_statistics"].as<bool>(false);
                 if (col["use_reset_q_stats"]) cfg.collector.use_reset_q_stats = col["use_reset_q_stats"].as<bool>(false);
+                if (col["use_publications"])  cfg.collector.use_publications = col["use_publications"].as<bool>(true);
                 if (col["rediscover_interval"])
                     cfg.collector.rediscover_interval = parse_duration(col["rediscover_interval"].as<std::string>("0s"), std::chrono::seconds(0));
 
@@ -266,6 +268,7 @@ std::string Config::to_string() const {
         << ", AccountingQueue: " << collector.accounting_queue
         << ", UseStatus: " << (collector.use_status ? "true" : "false")
         << ", UseStatistics: " << (collector.use_statistics ? "true" : "false")
+        << ", UsePublications: " << (collector.use_publications ? "true" : "false")
         << ", KeepRunning: " << (collector.keep_running ? "true" : "false");
     return oss.str();
 }

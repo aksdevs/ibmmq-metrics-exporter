@@ -603,6 +603,60 @@ std::vector<MQMessage> MQClient::receive_publications() {
     return messages;
 }
 
+std::optional<MQMessage> MQClient::subscribe_and_get(const std::string& topic_string) {
+    if (!connected_) return std::nullopt;
+
+    MQSD sd = {MQSD_DEFAULT};
+    sd.Options = MQSO_CREATE | MQSO_NON_DURABLE | MQSO_MANAGED | MQSO_FAIL_IF_QUIESCING;
+
+    std::string topic_copy = topic_string;
+    sd.ObjectString.VSPtr = topic_copy.data();
+    sd.ObjectString.VSLength = static_cast<MQLONG>(topic_copy.size());
+
+    MQHOBJ hobj = 0;
+    MQHOBJ hsub = 0;
+    MQLONG cc = 0, rc = 0;
+
+    MQSUB(hconn_, &sd, &hobj, &hsub, &cc, &rc);
+
+    if (cc == MQCC_FAILED) {
+        spdlog::debug("Failed to subscribe to '{}' (RC={})", topic_string, rc);
+        return std::nullopt;
+    }
+
+    // Try to get one retained message (no wait)
+    constexpr size_t BUF_SIZE = 64 * 1024;
+    std::vector<uint8_t> buffer(BUF_SIZE);
+
+    MQMD md = {MQMD_DEFAULT};
+    MQGMO gmo = {MQGMO_DEFAULT};
+    gmo.Options = MQGMO_NO_WAIT | MQGMO_CONVERT;
+
+    MQLONG datalen = 0;
+    MQGET(hconn_, hobj, &md, &gmo,
+          static_cast<MQLONG>(buffer.size()),
+          buffer.data(), &datalen, &cc, &rc);
+
+    // Close subscription and managed queue
+    MQLONG cc2 = 0, rc2 = 0;
+    if (hsub != 0) MQCLOSE(hconn_, &hsub, MQCO_NONE, &cc2, &rc2);
+    if (hobj != 0) MQCLOSE(hconn_, &hobj, MQCO_NONE, &cc2, &rc2);
+
+    if (cc == MQCC_FAILED || datalen <= 0) {
+        spdlog::debug("No retained message on '{}' (RC={})", topic_string, rc);
+        return std::nullopt;
+    }
+
+    MQMessage msg;
+    msg.data.assign(buffer.begin(), buffer.begin() + datalen);
+    msg.type = "publication";
+    msg.msg_type = md.MsgType;
+    msg.format = std::string(md.Format, sizeof(md.Format));
+
+    spdlog::debug("Got retained message from '{}', size={}", topic_string, datalen);
+    return msg;
+}
+
 void MQClient::unsubscribe_all() {
     for (auto& sub : subscriptions_) {
         MQLONG cc = 0, rc = 0;
