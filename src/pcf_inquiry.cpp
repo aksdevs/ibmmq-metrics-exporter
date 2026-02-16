@@ -105,56 +105,56 @@ void PCFInquiry::append_integer_param(std::vector<uint8_t>& buf, int32_t param_i
 // --- Command builders ---
 
 std::vector<uint8_t> PCFInquiry::build_inquire_q_cmd(const std::string& queue_name) {
-    auto buf = build_pcf_cmd(3, 1); // MQCMD_INQUIRE_Q, 1 param
+    auto buf = build_pcf_cmd(13, 1); // MQCMD_INQUIRE_Q = 13
     append_string_param(buf, 2016, queue_name); // MQCA_Q_NAME
     spdlog::debug("Built INQUIRE_Q PCF command for {}, size={}", queue_name, buf.size());
     return buf;
 }
 
 std::vector<uint8_t> PCFInquiry::build_inquire_q_status_cmd(const std::string& queue_name) {
-    auto buf = build_pcf_cmd(34, 2); // MQCMD_INQUIRE_Q_STATUS, 2 params
+    auto buf = build_pcf_cmd(41, 2); // MQCMD_INQUIRE_Q_STATUS = 41
     append_string_param(buf, 2016, queue_name); // MQCA_Q_NAME
-    append_integer_param(buf, 1238, 2); // MQIACF_Q_STATUS_TYPE = HANDLE
+    append_integer_param(buf, 1103, 1104); // MQIACF_Q_STATUS_TYPE = MQIACF_Q_HANDLE
     spdlog::debug("Built INQUIRE_Q_STATUS PCF command for {}, size={}", queue_name, buf.size());
     return buf;
 }
 
 std::vector<uint8_t> PCFInquiry::build_inquire_channel_status_cmd(const std::string& channel_pattern) {
-    auto buf = build_pcf_cmd(41, 1); // MQCMD_INQUIRE_CHANNEL_STATUS
+    auto buf = build_pcf_cmd(42, 1); // MQCMD_INQUIRE_CHANNEL_STATUS = 42
     append_string_param(buf, 3501, channel_pattern); // MQCACH_CHANNEL_NAME
     spdlog::debug("Built INQUIRE_CHANNEL_STATUS for {}, size={}", channel_pattern, buf.size());
     return buf;
 }
 
 std::vector<uint8_t> PCFInquiry::build_inquire_topic_status_cmd(const std::string& topic_pattern) {
-    auto buf = build_pcf_cmd(87, 1); // MQCMD_INQUIRE_TOPIC_STATUS
+    auto buf = build_pcf_cmd(183, 1); // MQCMD_INQUIRE_TOPIC_STATUS = 183
     append_string_param(buf, 2094, topic_pattern); // MQCA_TOPIC_STRING
     spdlog::debug("Built INQUIRE_TOPIC_STATUS for {}, size={}", topic_pattern, buf.size());
     return buf;
 }
 
 std::vector<uint8_t> PCFInquiry::build_inquire_sub_status_cmd(const std::string& sub_pattern) {
-    auto buf = build_pcf_cmd(92, 1); // MQCMD_INQUIRE_SUB_STATUS
+    auto buf = build_pcf_cmd(182, 1); // MQCMD_INQUIRE_SUB_STATUS = 182
     append_string_param(buf, 3152, sub_pattern); // MQCACF_SUB_NAME
     spdlog::debug("Built INQUIRE_SUB_STATUS for {}, size={}", sub_pattern, buf.size());
     return buf;
 }
 
 std::vector<uint8_t> PCFInquiry::build_inquire_qmgr_status_cmd() {
-    auto buf = build_pcf_cmd(161, 0); // MQCMD_INQUIRE_Q_MGR_STATUS, 0 params
+    auto buf = build_pcf_cmd(161, 0); // MQCMD_INQUIRE_Q_MGR_STATUS = 161
     spdlog::debug("Built INQUIRE_Q_MGR_STATUS, size={}", buf.size());
     return buf;
 }
 
 std::vector<uint8_t> PCFInquiry::build_inquire_cluster_qmgr_cmd() {
-    auto buf = build_pcf_cmd(71, 1); // MQCMD_INQUIRE_CLUSTER_Q_MGR
+    auto buf = build_pcf_cmd(70, 1); // MQCMD_INQUIRE_CLUSTER_Q_MGR = 70
     append_string_param(buf, 2029, "*"); // MQCA_CLUSTER_NAME = wildcard
     spdlog::debug("Built INQUIRE_CLUSTER_Q_MGR, size={}", buf.size());
     return buf;
 }
 
 std::vector<uint8_t> PCFInquiry::build_inquire_usage_cmd(int32_t usage_type) {
-    auto buf = build_pcf_cmd(84, 1); // MQCMD_INQUIRE_USAGE
+    auto buf = build_pcf_cmd(126, 1); // MQCMD_INQUIRE_USAGE = 126
     append_integer_param(buf, 1157, usage_type); // MQIACF_USAGE_TYPE
     spdlog::debug("Built INQUIRE_USAGE type={}, size={}", usage_type, buf.size());
     return buf;

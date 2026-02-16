@@ -164,11 +164,9 @@ std::optional<ParsedMessage> PCFParser::parse_message(const std::vector<uint8_t>
     case pcf::CMD_STATISTICS_Q:
     case pcf::CMD_STATISTICS_CHANNEL:
     case pcf::CMD_STATISTICS_MQI:
-    case pcf::CMD_Q_MGR_STATUS:
         return parse_statistics(hdr, params);
     case pcf::CMD_ACCOUNTING_Q:
     case pcf::CMD_ACCOUNTING_MQI:
-    case pcf::CMD_ACCOUNTING_CHANNEL:
         return parse_accounting(hdr, params);
     default:
         StatisticsData sd;
@@ -197,7 +195,6 @@ StatisticsData PCFParser::parse_statistics(const PCFHeader& hdr,
         stats.channel_stats = parse_channel_stats(params);
         break;
     case pcf::CMD_STATISTICS_MQI:
-    case pcf::CMD_Q_MGR_STATUS:
         stats.mqi_stats = parse_mqi_stats(params);
         break;
     }

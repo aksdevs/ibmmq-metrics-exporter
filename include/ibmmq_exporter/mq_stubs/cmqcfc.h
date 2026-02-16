@@ -18,23 +18,21 @@
 #define MQCFT_INTEGER64_LIST     25
 #define MQCFT_COMMAND_XR         16
 
-/* PCF commands */
-#define MQCMD_INQUIRE_Q                 3
+/* PCF commands (values from real IBM MQ 9.x headers) */
+#define MQCMD_INQUIRE_Q                 13
 #define MQCMD_RESET_Q_STATS             17
-#define MQCMD_INQUIRE_Q_STATUS          34
-#define MQCMD_INQUIRE_CHANNEL_STATUS    41
-#define MQCMD_INQUIRE_CLUSTER_Q_MGR     71
-#define MQCMD_INQUIRE_USAGE             84
-#define MQCMD_INQUIRE_TOPIC_STATUS      87
-#define MQCMD_INQUIRE_SUB_STATUS        92
-#define MQCMD_STATISTICS_MQI            112
-#define MQCMD_STATISTICS_Q              113
-#define MQCMD_STATISTICS_CHANNEL        114
-#define MQCMD_ACCOUNTING_MQI            138
-#define MQCMD_ACCOUNTING_Q              139
+#define MQCMD_INQUIRE_Q_STATUS          41
+#define MQCMD_INQUIRE_CHANNEL_STATUS    42
+#define MQCMD_INQUIRE_CLUSTER_Q_MGR     70
+#define MQCMD_INQUIRE_USAGE             126
 #define MQCMD_INQUIRE_Q_MGR_STATUS      161
-#define MQCMD_Q_MGR_STATUS              164
-#define MQCMD_ACCOUNTING_CHANNEL        167
+#define MQCMD_STATISTICS_MQI            164
+#define MQCMD_STATISTICS_Q              165
+#define MQCMD_STATISTICS_CHANNEL        166
+#define MQCMD_ACCOUNTING_MQI            167
+#define MQCMD_ACCOUNTING_Q              168
+#define MQCMD_INQUIRE_SUB_STATUS        182
+#define MQCMD_INQUIRE_TOPIC_STATUS      183
 
 /* PCF control */
 #define MQCFC_LAST               1
