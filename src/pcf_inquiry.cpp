@@ -105,8 +105,9 @@ void PCFInquiry::append_integer_param(std::vector<uint8_t>& buf, int32_t param_i
 // --- Command builders ---
 
 std::vector<uint8_t> PCFInquiry::build_inquire_q_cmd(const std::string& queue_name) {
-    auto buf = build_pcf_cmd(13, 1); // MQCMD_INQUIRE_Q = 13
+    auto buf = build_pcf_cmd(13, 2); // MQCMD_INQUIRE_Q = 13, 2 params
     append_string_param(buf, 2016, queue_name); // MQCA_Q_NAME
+    append_integer_param(buf, 20, 1); // MQIA_Q_TYPE = MQQT_LOCAL (exclude model/alias/remote)
     spdlog::debug("Built INQUIRE_Q PCF command for {}, size={}", queue_name, buf.size());
     return buf;
 }
