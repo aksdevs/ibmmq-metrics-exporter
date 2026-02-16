@@ -193,6 +193,12 @@ MQHOBJ MQClient::open_queue(const std::string& queue_name, MQLONG options) {
     od.ObjectType = MQOT_Q;
     std::strncpy(od.ObjectName, queue_name.c_str(), sizeof(od.ObjectName) - 1);
 
+    // Clear DynamicQName (MQOD_DEFAULT sets it to "AMQ.*") so that if a
+    // model queue name is accidentally passed, MQ won't silently create
+    // a permanent AMQ.* dynamic queue.  Only the 4-arg overload, which
+    // sets an explicit EXPORTER.* prefix, should create dynamic queues.
+    std::memset(od.DynamicQName, ' ', sizeof(od.DynamicQName));
+
     MQHOBJ hobj = 0;
     MQLONG cc = 0, rc = 0;
     MQOPEN(hconn_, &od, options, &hobj, &cc, &rc);
@@ -592,10 +598,11 @@ std::vector<std::string> MQClient::discover_queues(const std::string& pattern) {
         for (const auto& d : details) {
             if (d.queue_name.empty()) continue;
 
-            // Skip temporary/dynamic queues that should not be monitored
+            // Skip temporary/dynamic queues and model queues
             if (d.queue_name.substr(0, 4) == "AMQ." ||
                 d.queue_name.substr(0, 9) == "EXPORTER." ||
-                d.queue_name.find("MANAGED.NDURABLE") != std::string::npos)
+                d.queue_name.find("MANAGED.NDURABLE") != std::string::npos ||
+                d.queue_name.find("MODEL") != std::string::npos)
                 continue;
 
             queues.push_back(d.queue_name);
