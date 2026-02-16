@@ -111,14 +111,18 @@ typedef MQCHAR*  PMQCHAR;
 #define MQPL_APPLIANCE   28
 
 /* Close options */
+#define MQCO_IMMEDIATE     0x00000000
 #define MQCO_NONE          0x00000000
 #define MQCO_DELETE        0x00000001
 #define MQCO_DELETE_PURGE  0x00000002
+#define MQCO_KEEP_SUB      0x00000004
+#define MQCO_REMOVE_SUB    0x00000008
+#define MQCO_QUIESCE       0x00000020
 
 /* Subscription options */
 #define MQSO_CREATE              0x00000002
-#define MQSO_NON_DURABLE         0x00000020
-#define MQSO_MANAGED             0x00000800
+#define MQSO_NON_DURABLE         0x00000000
+#define MQSO_MANAGED             0x00000020
 #define MQSO_FAIL_IF_QUIESCING   0x00002000
 
 /* ----- MQCHARV - Variable length string ----- */
