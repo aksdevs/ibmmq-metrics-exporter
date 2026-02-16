@@ -226,7 +226,6 @@ void MetricsCollector::update_metrics_from_messages(
 void MetricsCollector::update_mqi_gauges(const MQIStatistics& mqi, const std::string& qmgr) {
     auto labels = add_meta_labels({
         {"queue_manager", qmgr},
-        {"queue_name", "unknown"},
         {"application_name", mqi.application_name},
         {"application_tag", mqi.application_tag},
         {"user_identifier", mqi.user_identifier},
@@ -370,7 +369,7 @@ void MetricsCollector::process_accounting_message(const MQMessage& msg) {
             chan  = acct->connection_info->channel_name;
         }
         auto labels = add_meta_labels({
-            {"queue_manager", qmgr}, {"queue_name", "unknown"},
+            {"queue_manager", qmgr},
             {"application_name", app}, {"application_tag", tag},
             {"user_identifier", uid}, {"connection_name", conn},
             {"channel_name", chan}});

@@ -105,6 +105,7 @@ void MQClient::disconnect() {
 
     unsubscribe_all();
 
+    if (reply_open_) close_queue(reply_queue_);
     if (stats_open_) close_queue(stats_queue_);
     if (acct_open_)  close_queue(acct_queue_);
 
@@ -118,6 +119,8 @@ void MQClient::disconnect() {
     connected_ = false;
     stats_open_ = false;
     acct_open_ = false;
+    reply_open_ = false;
+    reply_queue_name_.clear();
     spdlog::info("Disconnected from IBM MQ");
 }
 
@@ -196,13 +199,6 @@ void MQClient::close_queue(MQHOBJ& hobj) {
     if (hobj == 0) return;
     MQLONG cc = 0, rc = 0;
     MQCLOSE(hconn_, &hobj, MQCO_NONE, &cc, &rc);
-    hobj = 0;
-}
-
-static void close_queue_with_options(MQHCONN hconn, MQHOBJ& hobj, MQLONG options) {
-    if (hobj == 0) return;
-    MQLONG cc = 0, rc = 0;
-    MQCLOSE(hconn, &hobj, options, &cc, &rc);
     hobj = 0;
 }
 
@@ -369,44 +365,88 @@ std::vector<HandleInfo> MQClient::get_queue_handles(const std::string& queue_nam
     return {};
 }
 
+// --- Reusable reply queue for PCF commands ---
+
+void MQClient::ensure_reply_queue() {
+    if (reply_open_) return;
+
+    try {
+        reply_queue_ = open_queue("SYSTEM.DEFAULT.MODEL.QUEUE",
+                                  MQOO_INPUT_EXCLUSIVE, "EXPORTER.*", reply_queue_name_);
+    } catch (const std::exception& e) {
+        spdlog::error("Failed to create reply queue: {}", e.what());
+        return;
+    }
+
+    if (reply_queue_name_.empty() || reply_queue_name_ == "SYSTEM.DEFAULT.MODEL.QUEUE") {
+        close_queue(reply_queue_);
+        return;
+    }
+
+    reply_open_ = true;
+    spdlog::info("Created reusable reply queue: {}", reply_queue_name_);
+}
+
+void MQClient::drain_reply_queue() {
+    if (!reply_open_) return;
+
+    // Clear any stale messages from the reply queue before sending a new command
+    constexpr size_t BUF_SIZE = 4 * 1024;
+    std::vector<uint8_t> buf(BUF_SIZE);
+    int drained = 0;
+
+    for (int i = 0; i < 1000; ++i) {
+        MQMD md = {MQMD_DEFAULT};
+        MQGMO gmo = {MQGMO_DEFAULT};
+        gmo.Options = MQGMO_NO_WAIT;
+
+        MQLONG datalen = 0, cc = 0, rc = 0;
+        MQGET(hconn_, reply_queue_, &md, &gmo,
+              static_cast<MQLONG>(buf.size()),
+              buf.data(), &datalen, &cc, &rc);
+
+        if (cc == MQCC_FAILED) break;
+        ++drained;
+    }
+
+    if (drained > 0)
+        spdlog::debug("Drained {} stale messages from reply queue", drained);
+}
+
 // --- Reusable PCF command helper ---
 
 std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<uint8_t>& cmd) {
     std::vector<std::vector<uint8_t>> responses;
     if (!connected_) return responses;
 
-    // Create dynamic reply queue
-    std::string reply_q_name;
-    MQHOBJ reply_hobj = 0;
-    try {
-        reply_hobj = open_queue("SYSTEM.DEFAULT.MODEL.QUEUE",
-                                MQOO_INPUT_EXCLUSIVE, "AMQ.*", reply_q_name);
-    } catch (...) {
-        spdlog::debug("Failed to create dynamic reply queue for PCF");
+    // Ensure we have a reusable reply queue
+    ensure_reply_queue();
+    if (!reply_open_) {
+        spdlog::error("No reply queue available for PCF command");
         return responses;
     }
 
-    if (reply_q_name.empty() || reply_q_name == "SYSTEM.DEFAULT.MODEL.QUEUE") {
-        close_queue_with_options(hconn_, reply_hobj, MQCO_DELETE_PURGE);
-        return responses;
-    }
+    // Drain any stale messages before sending
+    drain_reply_queue();
 
     // Open command queue and send
     MQHOBJ cmd_hobj = 0;
     try {
         cmd_hobj = open_queue("SYSTEM.ADMIN.COMMAND.QUEUE", MQOO_OUTPUT);
     } catch (...) {
-        close_queue_with_options(hconn_, reply_hobj, MQCO_DELETE_PURGE);
         return responses;
     }
 
     MQMD md = {MQMD_DEFAULT};
     std::memcpy(md.Format, "MQADMIN ", sizeof(md.Format));
-    std::strncpy(md.ReplyToQ, reply_q_name.c_str(), sizeof(md.ReplyToQ) - 1);
+    std::strncpy(md.ReplyToQ, reply_queue_name_.c_str(), sizeof(md.ReplyToQ) - 1);
     md.MsgType = MQMT_REQUEST;
 
-    for (size_t i = 0; i < sizeof(md.CorrelId); ++i)
-        md.CorrelId[i] = static_cast<uint8_t>(65 + (i % 26));
+    // Use a unique correlation ID per command
+    static uint32_t seq = 0;
+    ++seq;
+    std::memset(md.CorrelId, 0, sizeof(md.CorrelId));
+    std::memcpy(md.CorrelId, &seq, sizeof(seq));
 
     MQPMO pmo = {MQPMO_DEFAULT};
     pmo.Options = MQPMO_NONE;
@@ -419,7 +459,6 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
 
     if (cc == MQCC_FAILED) {
         spdlog::debug("Failed to send PCF command (RC={})", rc);
-        close_queue_with_options(hconn_, reply_hobj, MQCO_DELETE_PURGE);
         return responses;
     }
 
@@ -434,7 +473,7 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
         gmo.WaitInterval = 5000;
 
         MQLONG datalen = 0;
-        MQGET(hconn_, reply_hobj, &resp_md, &gmo,
+        MQGET(hconn_, reply_queue_, &resp_md, &gmo,
               static_cast<MQLONG>(resp_buf.size()),
               resp_buf.data(), &datalen, &cc, &rc);
 
@@ -451,7 +490,6 @@ std::vector<std::vector<uint8_t>> MQClient::send_pcf_command(const std::vector<u
         }
     }
 
-    close_queue_with_options(hconn_, reply_hobj, MQCO_DELETE_PURGE);
     spdlog::debug("Received {} PCF response(s)", responses.size());
     return responses;
 }
@@ -545,8 +583,15 @@ std::vector<std::string> MQClient::discover_queues(const std::string& pattern) {
     for (const auto& resp : responses) {
         auto details = PCFInquiry::parse_queue_status_response(resp.data(), resp.size());
         for (const auto& d : details) {
-            if (!d.queue_name.empty())
-                queues.push_back(d.queue_name);
+            if (d.queue_name.empty()) continue;
+
+            // Skip temporary/dynamic queues that should not be monitored
+            if (d.queue_name.substr(0, 4) == "AMQ." ||
+                d.queue_name.substr(0, 9) == "EXPORTER." ||
+                d.queue_name.find("MANAGED.NDURABLE") != std::string::npos)
+                continue;
+
+            queues.push_back(d.queue_name);
         }
     }
     spdlog::info("Discovered {} queues matching '{}'", queues.size(), pattern);
